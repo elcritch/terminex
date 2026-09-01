@@ -1,51 +1,33 @@
-# terminex
+# Terminex
 
-GitHub template repository for Nim packages using Atlas for dependency
-management and GitHub Actions for CI.
+Terminex is a GUI-independent Nim terminal-emulator core. It provides a screen
+and scrollback model, an incremental ECMA-48/VT parser, xterm input encoding,
+and POSIX PTY session transport. GUI toolkits own rendering, event translation,
+selections, and clipboard policy.
 
-## Use This Template
-
-1. Create a new repository with GitHub's "Use this template" button.
-2. Clone the new repository locally.
-3. Pick the Nim package name you want to publish, using letters, numbers, and
-   underscores.
-4. Run:
-
-```sh
-./scripts/rename_template.sh your_package_name
-```
-
-That updates the starter package/module/test filenames and rewrites the
-remaining `terminex` / `terminex` references in the template files.
-
-## Setup
+## Install and test
 
 ```sh
 atlas install
+atlas-run tests
 ```
 
-Atlas writes dependency paths to `nim.cfg` and installs dependencies under
-`deps/`. Those files are intentionally ignored.
+## Use
 
-## Test
+```nim
+import terminex
 
-Run the full test suite:
-
-```sh
-nim test
+let session = spawnTerminalSession(
+  initTerminalSpawnOptions(command = "printf 'hello\\n'"),
+  columns = 80,
+  rows = 24,
+)
+defer: session.close()
+while session.running:
+  discard session.poll()
+echo session.screen.plainText()
 ```
 
-Run a single test:
-
-```sh
-nim r tests/tyour_package_name.nim
-```
-
-## Layout
-
-- `src/your_package_name.nim`: package module after renaming.
-- `tests/tyour_package_name.nim`: unit tests after renaming.
-- `config.nims`: shared Nim switches and the `nim test` task.
-- `.github/workflows/ci.yml`: GitHub Actions CI.
-- `scripts/rename_template.sh`: one-shot template bootstrap rename.
-# terminex
+The input helpers turn frontend key, mouse, paste, and focus events into terminal
+bytes. `TerminalSpawnOptions.terminalProgram` defaults to `"Terminex"`; set it
+to an empty string to omit `TERM_PROGRAM`.

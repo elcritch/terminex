@@ -1,6 +1,5 @@
-## Root module for terminex.
+## Reusable terminal-emulator state, parser, input encoding, and PTY transport.
 
-proc greet*(name: string): string =
-  ## Returns a greeting for `name`.
-  "hello, " & name
+import terminex/[terminput, termparser, termscreen, termsessions]
 
+export terminput, termparser, termscreen, termsessions
