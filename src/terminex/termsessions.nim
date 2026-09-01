@@ -13,48 +13,48 @@ const
   TerminalReadChunkSize = 16 * 1024
 
 type
-  TerminalEnvironmentVariable* = object
+  TerminexEnvironmentVariable* = object
     name*, value*: string
 
-  TerminalSpawnOptions* = object
+  TerminexSpawnOptions* = object
     command*: string
     shell*: string
     workingDirectory*: string
-    environment*: seq[TerminalEnvironmentVariable]
+    environment*: seq[TerminexEnvironmentVariable]
     terminalName*: string
     colorTerminal*: string
     terminalProgram*: string
 
-  TerminalSessionState* = enum
+  TerminexSessionState* = enum
     tssIdle
     tssRunning
     tssExited
     tssClosed
     tssFailed
 
-  TerminalPollResult* = object
+  TerminexPollResult* = object
     bytesRead*: int
     screenChanged*: bool
     processExited*: bool
 
-  TerminalScreenInfo* = object
+  TerminexScreenInfo* = object
     ## Cheap session-owned screen metadata for rendering and input decisions.
     columns*, rows*: int
     scrollbackCount*, totalLineCount*: int
     generation*: uint64
     alternateScreen*: bool
-    cursor*: TerminalCursor
-    modes*: TerminalModes
+    cursor*: TerminexCursor
+    modes*: TerminexModes
     title*, currentDirectory*: string
     bellCount*: uint64
     clipboardRequestPending*: bool
 
-  TerminalSessionError* = object of CatchableError
+  TerminexSessionError* = object of CatchableError
 
-  TerminalSessionObj[Cell, Line, Scrollback] = object
-    xScreen: TerminalScreen[Cell, Line, Scrollback]
-    xParser: TerminalParser
-    xState: TerminalSessionState
+  TerminexSessionObj[Cell, Line, Scrollback] = object
+    xScreen: TerminexScreen[Cell, Line, Scrollback]
+    xParser: TerminexParser
+    xState: TerminexSessionState
     xExitCode: int
     xError: string
     xPendingWrite: string
@@ -63,7 +63,7 @@ type
       xMasterFd: cint
       xChildPid: Pid
 
-  TerminalSession*[Cell = TerminalCell, Line = seq[Cell], Scrollback = seq[Line]] = ref TerminalSessionObj[
+  TerminexSession*[Cell = TerminexCell, Line = seq[Cell], Scrollback = seq[Line]] = ref TerminexSessionObj[
     Cell, Line, Scrollback
   ]
 
@@ -84,7 +84,7 @@ when defined(posix):
       master: var cint, name: cstring, termios: pointer, size: pointer
     ): Pid {.importc, header: "<pty.h>".}
 
-  type TerminalWindowSize {.importc: "struct winsize", header: "<sys/ioctl.h>".} = object
+  type TerminexWindowSize {.importc: "struct winsize", header: "<sys/ioctl.h>".} = object
     ws_row: cushort
     ws_col: cushort
     ws_xpixel: cushort
@@ -100,7 +100,7 @@ when defined(posix):
   ): cint {.importc: "ioctl", header: "<sys/ioctl.h>", varargs.}
 
 template releaseTerminalProcess[Cell, Line, Scrollback](
-    session: TerminalSessionObj[Cell, Line, Scrollback]
+    session: TerminexSessionObj[Cell, Line, Scrollback]
 ) =
   when defined(posix):
     if session.xMasterFd >= 0:
@@ -113,41 +113,41 @@ template releaseTerminalProcess[Cell, Line, Scrollback](
       discard waitpid(session.xChildPid, status, 0)
 
 proc `=destroy`[Cell, Line, Scrollback](
-    session: TerminalSessionObj[Cell, Line, Scrollback]
+    session: TerminexSessionObj[Cell, Line, Scrollback]
 ) =
   releaseTerminalProcess(session)
 
 proc `=wasMoved`[Cell, Line, Scrollback](
-    session: var TerminalSessionObj[Cell, Line, Scrollback]
+    session: var TerminexSessionObj[Cell, Line, Scrollback]
 ) =
   when defined(posix):
     session.xMasterFd = -1
     session.xChildPid = 0
 
 proc `=copy`[Cell, Line, Scrollback](
-  destination: var TerminalSessionObj[Cell, Line, Scrollback],
-  source: TerminalSessionObj[Cell, Line, Scrollback],
+  destination: var TerminexSessionObj[Cell, Line, Scrollback],
+  source: TerminexSessionObj[Cell, Line, Scrollback],
 ) {.error.}
 
 proc `=dup`[Cell, Line, Scrollback](
-  source: TerminalSessionObj[Cell, Line, Scrollback]
-): TerminalSessionObj[Cell, Line, Scrollback] {.error.}
+  source: TerminexSessionObj[Cell, Line, Scrollback]
+): TerminexSessionObj[Cell, Line, Scrollback] {.error.}
 
 func initTerminalEnvironmentVariable*(
     name, value: string
-): TerminalEnvironmentVariable =
-  TerminalEnvironmentVariable(name: name, value: value)
+): TerminexEnvironmentVariable =
+  TerminexEnvironmentVariable(name: name, value: value)
 
 func initTerminalSpawnOptions*(
     command = "",
     shell = "",
     workingDirectory = "",
-    environment: openArray[TerminalEnvironmentVariable] = [],
+    environment: openArray[TerminexEnvironmentVariable] = [],
     terminalName = "xterm-256color",
     colorTerminal = "truecolor",
     terminalProgram = "Terminex",
-): TerminalSpawnOptions =
-  TerminalSpawnOptions(
+): TerminexSpawnOptions =
+  TerminexSpawnOptions(
     command: command,
     shell: shell,
     workingDirectory: workingDirectory,
@@ -161,15 +161,15 @@ func terminalSessionsSupported*(): bool =
   defined(posix)
 
 proc newTerminalSession*[
-    Cell: TerminalCellAdapter,
-    Line: TerminalLineAdapter[Cell],
-    Scrollback: TerminalScrollbackAdapter[Line],
+    Cell: TerminexCellAdapter,
+    Line: TerminexLineAdapter[Cell],
+    Scrollback: TerminexScrollbackAdapter[Line],
 ](
-    screenType: typedesc[TerminalScreen[Cell, Line, Scrollback]],
+    screenType: typedesc[TerminexScreen[Cell, Line, Scrollback]],
     columns = DefaultTerminalColumns,
     rows = DefaultTerminalRows,
     maxScrollback = DefaultTerminalScrollback,
-): TerminalSession[Cell, Line, Scrollback] =
+): TerminexSession[Cell, Line, Scrollback] =
   new(result)
   result.xScreen = initTerminalScreen(screenType, columns, rows, maxScrollback)
   result.xParser = initTerminalParser()
@@ -180,39 +180,39 @@ proc newTerminalSession*[
   when defined(posix):
     result.xMasterFd = -1
 
-proc newTerminalSession*[Cell: TerminalCellAdapter](
+proc newTerminalSession*[Cell: TerminexCellAdapter](
     _: typedesc[Cell],
     columns = DefaultTerminalColumns,
     rows = DefaultTerminalRows,
     maxScrollback = DefaultTerminalScrollback,
-): TerminalSession[Cell, seq[Cell], seq[seq[Cell]]] =
+): TerminexSession[Cell, seq[Cell], seq[seq[Cell]]] =
   ## Construct a custom-cell session with sequence-backed lines and scrollback.
   newTerminalSession(
-    TerminalScreen[Cell, seq[Cell], seq[seq[Cell]]], columns, rows, maxScrollback
+    TerminexScreen[Cell, seq[Cell], seq[seq[Cell]]], columns, rows, maxScrollback
   )
 
 proc newTerminalSession*(
     columns = DefaultTerminalColumns,
     rows = DefaultTerminalRows,
     maxScrollback = DefaultTerminalScrollback,
-): TerminalSession[TerminalCell, TerminalLine, seq[TerminalLine]] =
+): TerminexSession[TerminexCell, TerminexLine, seq[TerminexLine]] =
   newTerminalSession(
-    TerminalScreen[TerminalCell, TerminalLine, seq[TerminalLine]],
+    TerminexScreen[TerminexCell, TerminexLine, seq[TerminexLine]],
     columns,
     rows,
     maxScrollback,
   )
 
 func screen*[Cell, Line, Scrollback](
-    session: TerminalSession[Cell, Line, Scrollback]
-): lent TerminalScreen[Cell, Line, Scrollback] =
+    session: TerminexSession[Cell, Line, Scrollback]
+): lent TerminexScreen[Cell, Line, Scrollback] =
   session.xScreen
 
 func screenInfo*[Cell, Line, Scrollback](
-    session: TerminalSession[Cell, Line, Scrollback]
-): TerminalScreenInfo =
+    session: TerminexSession[Cell, Line, Scrollback]
+): TerminexScreenInfo =
   ## Return screen metadata without copying the terminal cells or scrollback.
-  TerminalScreenInfo(
+  TerminexScreenInfo(
     columns: session.xScreen.columns,
     rows: session.xScreen.rows,
     scrollbackCount: session.xScreen.scrollbackCount(),
@@ -228,84 +228,84 @@ func screenInfo*[Cell, Line, Scrollback](
   )
 
 func lineAtAbsolute*[Cell, Line, Scrollback](
-    session: TerminalSession[Cell, Line, Scrollback], index: int
+    session: TerminexSession[Cell, Line, Scrollback], index: int
 ): Line =
   session.xScreen.lineAtAbsolute(index)
 
 func state*[Cell, Line, Scrollback](
-    session: TerminalSession[Cell, Line, Scrollback]
-): TerminalSessionState =
+    session: TerminexSession[Cell, Line, Scrollback]
+): TerminexSessionState =
   session.xState
 
 func running*[Cell, Line, Scrollback](
-    session: TerminalSession[Cell, Line, Scrollback]
+    session: TerminexSession[Cell, Line, Scrollback]
 ): bool =
   session.xState == tssRunning
 
 func exitCode*[Cell, Line, Scrollback](
-    session: TerminalSession[Cell, Line, Scrollback]
+    session: TerminexSession[Cell, Line, Scrollback]
 ): int =
   session.xExitCode
 
 func lastError*[Cell, Line, Scrollback](
-    session: TerminalSession[Cell, Line, Scrollback]
+    session: TerminexSession[Cell, Line, Scrollback]
 ): string =
   session.xError
 
 func pendingWriteBytes*[Cell, Line, Scrollback](
-    session: TerminalSession[Cell, Line, Scrollback]
+    session: TerminexSession[Cell, Line, Scrollback]
 ): int =
   session.xPendingWrite.len
 
 proc takeClipboardRequest*[Cell, Line, Scrollback](
-    session: TerminalSession[Cell, Line, Scrollback]
+    session: TerminexSession[Cell, Line, Scrollback]
 ): string =
   ## Consume a clipboard write requested by the child through OSC 52.
   session.xScreen.takeClipboardRequest()
 
 proc clearScrollback*[Cell, Line, Scrollback](
-    session: TerminalSession[Cell, Line, Scrollback]
+    session: TerminexSession[Cell, Line, Scrollback]
 ) =
   ## Remove saved terminal history without changing the live screen.
   if not session.isNil:
     session.xScreen.clearScrollback()
 
 func readLimit*[Cell, Line, Scrollback](
-    session: TerminalSession[Cell, Line, Scrollback]
+    session: TerminexSession[Cell, Line, Scrollback]
 ): int =
   session.xReadLimit
 
 proc `readLimit=`*[Cell, Line, Scrollback](
-    session: TerminalSession[Cell, Line, Scrollback], value: int
+    session: TerminexSession[Cell, Line, Scrollback], value: int
 ) =
   session.xReadLimit = max(value, TerminalReadChunkSize)
 
 func writeLimit*[Cell, Line, Scrollback](
-    session: TerminalSession[Cell, Line, Scrollback]
+    session: TerminexSession[Cell, Line, Scrollback]
 ): int =
   session.xWriteLimit
 
 proc `writeLimit=`*[Cell, Line, Scrollback](
-    session: TerminalSession[Cell, Line, Scrollback], value: int
+    session: TerminexSession[Cell, Line, Scrollback], value: int
 ) =
   session.xWriteLimit = max(value, 1)
 
 proc processOutput*[Cell, Line, Scrollback](
-    session: TerminalSession[Cell, Line, Scrollback], data: string
+    session: TerminexSession[Cell, Line, Scrollback], data: string
 ) =
   session.xParser.feed(session.xScreen, data)
 
 when defined(posix):
-  proc ioError(operation: string): ref TerminalSessionError =
-    newException(TerminalSessionError, operation & ": " & $strerror(errno))
+  proc ioError(operation: string): ref TerminexSessionError =
+    newException(TerminexSessionError, operation & ": " & $strerror(errno))
 
-  proc resolvedShell(options: TerminalSpawnOptions): string =
+  proc resolvedShell(options: TerminexSpawnOptions): string =
     if options.shell.len > 0:
       options.shell
     else:
       getEnv("SHELL", "/bin/sh")
 
-  proc childEnvironment(options: TerminalSpawnOptions): seq[string] =
+  proc childEnvironment(options: TerminexSpawnOptions): seq[string] =
     var environment = initOrderedTable[string, string]()
     for name, value in envPairs():
       environment[name] = value
@@ -335,13 +335,13 @@ when defined(posix):
       raise ioError("configure PTY")
 
 proc start*[Cell, Line, Scrollback](
-    session: TerminalSession[Cell, Line, Scrollback],
+    session: TerminexSession[Cell, Line, Scrollback],
     options = initTerminalSpawnOptions(),
 ) =
   if session.isNil:
-    raise newException(TerminalSessionError, "cannot start a nil terminal session")
+    raise newException(TerminexSessionError, "cannot start a nil terminal session")
   if session.xState == tssRunning:
-    raise newException(TerminalSessionError, "terminal session is already running")
+    raise newException(TerminexSessionError, "terminal session is already running")
   when defined(posix):
     # The child of a threaded process may only call async-signal-safe operations
     # before exec, so allocate its argument and environment blocks in the parent.
@@ -361,20 +361,20 @@ proc start*[Cell, Line, Scrollback](
       deallocCStringArray(environment)
     var
       descriptor: cint
-      windowSize = TerminalWindowSize(
+      windowSize = TerminexWindowSize(
         ws_row: session.xScreen.rows.cushort, ws_col: session.xScreen.columns.cushort
       )
     let child = forkpty(descriptor, nil, nil, addr windowSize)
     if child < 0:
       session.xState = tssFailed
       session.xError = "start PTY: " & $strerror(errno)
-      raise newException(TerminalSessionError, session.xError)
+      raise newException(TerminexSessionError, session.xError)
     if child == 0:
       executeChild(shell.cstring, workingDirectory, arguments, environment)
 
     try:
       descriptor.setNonBlocking()
-    except TerminalSessionError as error:
+    except TerminexSessionError as error:
       discard posix.close(descriptor)
       discard killpg(child, SIGKILL)
       discard kill(child, SIGKILL)
@@ -392,32 +392,32 @@ proc start*[Cell, Line, Scrollback](
   else:
     session.xState = tssFailed
     session.xError = "pseudo-terminals are not supported on this platform"
-    raise newException(TerminalSessionError, session.xError)
+    raise newException(TerminexSessionError, session.xError)
 
 proc spawnTerminalSession*[
-    Cell: TerminalCellAdapter,
-    Line: TerminalLineAdapter[Cell],
-    Scrollback: TerminalScrollbackAdapter[Line],
+    Cell: TerminexCellAdapter,
+    Line: TerminexLineAdapter[Cell],
+    Scrollback: TerminexScrollbackAdapter[Line],
 ](
-    screenType: typedesc[TerminalScreen[Cell, Line, Scrollback]],
+    screenType: typedesc[TerminexScreen[Cell, Line, Scrollback]],
     options = initTerminalSpawnOptions(),
     columns = DefaultTerminalColumns,
     rows = DefaultTerminalRows,
     maxScrollback = DefaultTerminalScrollback,
-): TerminalSession[Cell, Line, Scrollback] =
+): TerminexSession[Cell, Line, Scrollback] =
   result = newTerminalSession(screenType, columns, rows, maxScrollback)
   result.start(options)
 
-proc spawnTerminalSession*[Cell: TerminalCellAdapter](
+proc spawnTerminalSession*[Cell: TerminexCellAdapter](
     _: typedesc[Cell],
     options = initTerminalSpawnOptions(),
     columns = DefaultTerminalColumns,
     rows = DefaultTerminalRows,
     maxScrollback = DefaultTerminalScrollback,
-): TerminalSession[Cell, seq[Cell], seq[seq[Cell]]] =
+): TerminexSession[Cell, seq[Cell], seq[seq[Cell]]] =
   ## Spawn a custom-cell session with sequence-backed lines and scrollback.
   spawnTerminalSession(
-    TerminalScreen[Cell, seq[Cell], seq[seq[Cell]]],
+    TerminexScreen[Cell, seq[Cell], seq[seq[Cell]]],
     options,
     columns,
     rows,
@@ -429,9 +429,9 @@ proc spawnTerminalSession*(
     columns = DefaultTerminalColumns,
     rows = DefaultTerminalRows,
     maxScrollback = DefaultTerminalScrollback,
-): TerminalSession[TerminalCell, TerminalLine, seq[TerminalLine]] =
+): TerminexSession[TerminexCell, TerminexLine, seq[TerminexLine]] =
   spawnTerminalSession(
-    TerminalScreen[TerminalCell, TerminalLine, seq[TerminalLine]],
+    TerminexScreen[TerminexCell, TerminexLine, seq[TerminexLine]],
     options,
     columns,
     rows,
@@ -440,7 +440,7 @@ proc spawnTerminalSession*(
 
 when defined(posix):
   proc tryWrite[Cell, Line, Scrollback](
-      session: TerminalSession[Cell, Line, Scrollback]
+      session: TerminexSession[Cell, Line, Scrollback]
   ): int =
     while session.xPendingWrite.len > 0:
       let written = posix.write(
@@ -463,7 +463,7 @@ when defined(posix):
         raise ioError("write PTY")
 
 proc flushInput*[Cell, Line, Scrollback](
-    session: TerminalSession[Cell, Line, Scrollback]
+    session: TerminexSession[Cell, Line, Scrollback]
 ): int {.discardable.} =
   if not session.running() or session.xPendingWrite.len == 0:
     return
@@ -471,21 +471,21 @@ proc flushInput*[Cell, Line, Scrollback](
     result = session.tryWrite()
 
 proc write*[Cell, Line, Scrollback](
-    session: TerminalSession[Cell, Line, Scrollback], data: string
+    session: TerminexSession[Cell, Line, Scrollback], data: string
 ) =
   if not session.running():
-    raise newException(TerminalSessionError, "terminal session is not running")
+    raise newException(TerminexSessionError, "terminal session is not running")
   if data.len == 0:
     return
   discard session.flushInput()
   if session.xPendingWrite.len + data.len > session.xWriteLimit:
-    raise newException(TerminalSessionError, "terminal input buffer is full")
+    raise newException(TerminexSessionError, "terminal input buffer is full")
   session.xPendingWrite.add data
   discard session.flushInput()
 
 when defined(posix):
   proc recordExit[Cell, Line, Scrollback](
-      session: TerminalSession[Cell, Line, Scrollback], status: cint
+      session: TerminexSession[Cell, Line, Scrollback], status: cint
   ) =
     if WIFEXITED(status):
       session.xExitCode = WEXITSTATUS(status).int
@@ -500,7 +500,7 @@ when defined(posix):
       session.xMasterFd = -1
 
   proc checkExit[Cell, Line, Scrollback](
-      session: TerminalSession[Cell, Line, Scrollback]
+      session: TerminexSession[Cell, Line, Scrollback]
   ): bool =
     if session.xChildPid <= 0:
       return session.xState == tssExited
@@ -513,8 +513,8 @@ when defined(posix):
       false
 
 proc poll*[Cell, Line, Scrollback](
-    session: TerminalSession[Cell, Line, Scrollback]
-): TerminalPollResult =
+    session: TerminexSession[Cell, Line, Scrollback]
+): TerminexPollResult =
   if not session.running():
     result.processExited = session.xState == tssExited
     return
@@ -542,24 +542,24 @@ proc poll*[Cell, Line, Scrollback](
       for reply in replies:
         session.write(reply)
       result.processExited = session.checkExit()
-  except TerminalSessionError as error:
+  except TerminexSessionError as error:
     session.xError = error.msg
   result.screenChanged = generation != session.xScreen.generation
 
 proc resize*[Cell, Line, Scrollback](
-    session: TerminalSession[Cell, Line, Scrollback], columns, rows: int
+    session: TerminexSession[Cell, Line, Scrollback], columns, rows: int
 ) =
   session.xScreen.resize(columns, rows)
   if session.running():
     when defined(posix):
-      var size = TerminalWindowSize(
+      var size = TerminexWindowSize(
         ws_row: session.xScreen.rows.cushort, ws_col: session.xScreen.columns.cushort
       )
       if terminalIoctl(session.xMasterFd, TerminalSetWindowSize, addr size) < 0:
         session.xError = "resize PTY: " & $strerror(errno)
 
 proc sendSignal*[Cell, Line, Scrollback](
-    session: TerminalSession[Cell, Line, Scrollback], signal: int
+    session: TerminexSession[Cell, Line, Scrollback], signal: int
 ): bool {.discardable.} =
   if not session.running():
     return false
@@ -567,7 +567,7 @@ proc sendSignal*[Cell, Line, Scrollback](
     result = killpg(session.xChildPid, signal.cint) == 0
 
 proc interrupt*[Cell, Line, Scrollback](
-    session: TerminalSession[Cell, Line, Scrollback]
+    session: TerminexSession[Cell, Line, Scrollback]
 ): bool {.discardable.} =
   when defined(posix):
     session.sendSignal(SIGINT)
@@ -575,14 +575,14 @@ proc interrupt*[Cell, Line, Scrollback](
     false
 
 proc terminate*[Cell, Line, Scrollback](
-    session: TerminalSession[Cell, Line, Scrollback]
+    session: TerminexSession[Cell, Line, Scrollback]
 ): bool {.discardable.} =
   when defined(posix):
     session.sendSignal(SIGTERM)
   else:
     false
 
-proc close*[Cell, Line, Scrollback](session: TerminalSession[Cell, Line, Scrollback]) =
+proc close*[Cell, Line, Scrollback](session: TerminexSession[Cell, Line, Scrollback]) =
   if session.isNil or session.xState == tssClosed:
     return
   when defined(posix):

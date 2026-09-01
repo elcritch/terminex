@@ -12,13 +12,13 @@ const
   DefaultTerminalScrollback* = 10_000
 
 type
-  TerminalColorKind* = enum
+  TerminexColorKind* = enum
     tckDefault
     tckIndexed
     tckRgb
 
-  TerminalColor* = object
-    case kind*: TerminalColorKind
+  TerminexColor* = object
+    case kind*: TerminexColorKind
     of tckDefault:
       discard
     of tckIndexed:
@@ -26,7 +26,7 @@ type
     of tckRgb:
       red*, green*, blue*: uint8
 
-  TerminalAttribute* = enum
+  TerminexAttribute* = enum
     taBold
     taFaint
     taItalic
@@ -38,39 +38,39 @@ type
     taStrikethrough
     taOverline
 
-  TerminalStyle* = object
-    foreground*, background*, underlineColor*: TerminalColor
-    attributes*: set[TerminalAttribute]
+  TerminexStyle* = object
+    foreground*, background*, underlineColor*: TerminexColor
+    attributes*: set[TerminexAttribute]
     hyperlink*: string
 
-  TerminalCell* = object
+  TerminexCell* = object
     text*: string
-    style*: TerminalStyle
+    style*: TerminexStyle
     continuation*: bool
 
-  TerminalLine* = seq[TerminalCell]
+  TerminexLine* = seq[TerminexCell]
 
-  TerminalPosition* = object
+  TerminexPosition* = object
     row*, column*: int
 
-  TerminalCursorShape* = enum
+  TerminexCursorShape* = enum
     tcsBlock
     tcsUnderline
     tcsBar
 
-  TerminalMouseTracking* = enum
+  TerminexMouseTracking* = enum
     tmtNone
     tmtX10
     tmtButton
     tmtAny
 
-  TerminalMouseEncoding* = enum
+  TerminexMouseEncoding* = enum
     tmeX10
     tmeUtf8
     tmeSgr
     tmeUrxvt
 
-  TerminalModes* = object
+  TerminexModes* = object
     insert*: bool
     origin*: bool
     autoWrap*: bool
@@ -79,38 +79,38 @@ type
     bracketedPaste*: bool
     focusReporting*: bool
     alternateScroll*: bool
-    mouseTracking*: TerminalMouseTracking
-    mouseEncoding*: TerminalMouseEncoding
+    mouseTracking*: TerminexMouseTracking
+    mouseEncoding*: TerminexMouseEncoding
 
-  TerminalCursor* = object
-    position*: TerminalPosition
+  TerminexCursor* = object
+    position*: TerminexPosition
     visible*: bool
     blinking*: bool
-    shape*: TerminalCursorShape
+    shape*: TerminexCursorShape
 
-  TerminalSavedState = object
-    cursor: TerminalCursor
-    style: TerminalStyle
-    modes: TerminalModes
+  TerminexSavedState = object
+    cursor: TerminexCursor
+    style: TerminexStyle
+    modes: TerminexModes
     wrapPending: bool
 
-  ## A cell implementation accepted by `TerminalScreen`. Custom cell types
+  ## A cell implementation accepted by `TerminexScreen`. Custom cell types
   ## supply the `initTerminalCell`, `cellText`, `cellStyle`, and
   ## `cellContinuation` accessors documented below.
-  TerminalCellAdapter* =
+  TerminexCellAdapter* =
     concept cell
         mixin initTerminalCell, cellText, cellStyle, cellContinuation
         var writable: typeof(cell)
         initTerminalCell(typeof(cell), "", initTerminalStyle()) is typeof(cell)
         cellText(cell) is string
-        cellStyle(cell) is TerminalStyle
+        cellStyle(cell) is TerminexStyle
         cellContinuation(cell) is bool
         writable.cellText = ""
         writable.cellStyle = initTerminalStyle()
         writable.cellContinuation = false
 
-  ## A line implementation accepted by `TerminalScreen`.
-  TerminalLineAdapter*[Cell] =
+  ## A line implementation accepted by `TerminexScreen`.
+  TerminexLineAdapter*[Cell] =
     concept line
         mixin initTerminalLine, len, `[]`, `[]=`
         var writable: typeof(line)
@@ -119,16 +119,16 @@ type
         line[0] is Cell
         writable[0] = line[0]
 
-  TerminalScrollbackAdapter*[Line] = RingBufferStorageAdapter[Line]
+  TerminexScrollbackAdapter*[Line] = RingBufferStorageAdapter[Line]
 
-  TerminalScreen*[Cell = TerminalCell, Line = seq[Cell], Scrollback = seq[Line]] = object
+  TerminexScreen*[Cell = TerminexCell, Line = seq[Cell], Scrollback = seq[Line]] = object
     columns*, rows*: int
     cells: seq[Cell]
     scrollback: RingBuffer[Line, Scrollback]
     rowOrigin: int
-    cursor*: TerminalCursor
-    style*: TerminalStyle
-    modes*: TerminalModes
+    cursor*: TerminexCursor
+    style*: TerminexStyle
+    modes*: TerminexModes
     scrollTop*, scrollBottom*: int
     title*, iconName*, currentDirectory*: string
     pendingReplies: seq[string]
@@ -138,26 +138,26 @@ type
     alternateScreen*: bool
     generation*: uint64
     tabStops: seq[bool]
-    saved: TerminalSavedState
+    saved: TerminexSavedState
     primaryCells: seq[Cell]
     primaryRowOrigin: int
-    primaryCursor: TerminalCursor
-    primarySaved: TerminalSavedState
+    primaryCursor: TerminexCursor
+    primarySaved: TerminexSavedState
     wrapPending: bool
     lastPrintedText: string
 
 const ZeroWidthCategories = ctgMn + ctgMe + ctgCf
 
-func defaultTerminalColor*(): TerminalColor =
-  TerminalColor(kind: tckDefault)
+func defaultTerminalColor*(): TerminexColor =
+  TerminexColor(kind: tckDefault)
 
-func indexedTerminalColor*(index: uint8): TerminalColor =
-  TerminalColor(kind: tckIndexed, index: index)
+func indexedTerminalColor*(index: uint8): TerminexColor =
+  TerminexColor(kind: tckIndexed, index: index)
 
-func rgbTerminalColor*(red, green, blue: uint8): TerminalColor =
-  TerminalColor(kind: tckRgb, red: red, green: green, blue: blue)
+func rgbTerminalColor*(red, green, blue: uint8): TerminexColor =
+  TerminexColor(kind: tckRgb, red: red, green: green, blue: blue)
 
-func `==`*(left, right: TerminalColor): bool =
+func `==`*(left, right: TerminexColor): bool =
   if left.kind != right.kind:
     return false
   case left.kind
@@ -168,38 +168,38 @@ func `==`*(left, right: TerminalColor): bool =
   of tckRgb:
     left.red == right.red and left.green == right.green and left.blue == right.blue
 
-func initTerminalStyle*(): TerminalStyle =
-  TerminalStyle(
+func initTerminalStyle*(): TerminexStyle =
+  TerminexStyle(
     foreground: defaultTerminalColor(),
     background: defaultTerminalColor(),
     underlineColor: defaultTerminalColor(),
   )
 
-func initTerminalCell*(text = "", style = initTerminalStyle()): TerminalCell =
-  TerminalCell(text: text, style: style)
+func initTerminalCell*(text = "", style = initTerminalStyle()): TerminexCell =
+  TerminexCell(text: text, style: style)
 
 func initTerminalCell*(
-    _: typedesc[TerminalCell], text = "", style = initTerminalStyle()
-): TerminalCell =
-  ## Default custom-cell constructor used by `TerminalScreen`.
+    _: typedesc[TerminexCell], text = "", style = initTerminalStyle()
+): TerminexCell =
+  ## Default custom-cell constructor used by `TerminexScreen`.
   initTerminalCell(text, style)
 
-func cellText*(cell: TerminalCell): string =
+func cellText*(cell: TerminexCell): string =
   cell.text
 
-proc `cellText=`*(cell: var TerminalCell, text: string) =
+proc `cellText=`*(cell: var TerminexCell, text: string) =
   cell.text = text
 
-func cellStyle*(cell: TerminalCell): TerminalStyle =
+func cellStyle*(cell: TerminexCell): TerminexStyle =
   cell.style
 
-proc `cellStyle=`*(cell: var TerminalCell, style: TerminalStyle) =
+proc `cellStyle=`*(cell: var TerminexCell, style: TerminexStyle) =
   cell.style = style
 
-func cellContinuation*(cell: TerminalCell): bool =
+func cellContinuation*(cell: TerminexCell): bool =
   cell.continuation
 
-proc `cellContinuation=`*(cell: var TerminalCell, continuation: bool) =
+proc `cellContinuation=`*(cell: var TerminexCell, continuation: bool) =
   cell.continuation = continuation
 
 func initTerminalLine*[Cell](_: typedesc[seq[Cell]], length: int): seq[Cell] =
@@ -215,36 +215,36 @@ template makeCell(
     result
 
 static:
-  doAssert TerminalCell is TerminalCellAdapter
-  doAssert TerminalLine is TerminalLineAdapter[TerminalCell]
-  doAssert seq[TerminalLine] is TerminalScrollbackAdapter[TerminalLine]
+  doAssert TerminexCell is TerminexCellAdapter
+  doAssert TerminexLine is TerminexLineAdapter[TerminexCell]
+  doAssert seq[TerminexLine] is TerminexScrollbackAdapter[TerminexLine]
 
-func initTerminalPosition*(row, column: int): TerminalPosition =
-  TerminalPosition(row: row, column: column)
+func initTerminalPosition*(row, column: int): TerminexPosition =
+  TerminexPosition(row: row, column: column)
 
-func initTerminalModes*(): TerminalModes =
-  TerminalModes(autoWrap: true, mouseEncoding: tmeX10)
+func initTerminalModes*(): TerminexModes =
+  TerminexModes(autoWrap: true, mouseEncoding: tmeX10)
 
-func initTerminalCursor*(): TerminalCursor =
-  TerminalCursor(visible: true, blinking: true, shape: tcsBlock)
+func initTerminalCursor*(): TerminexCursor =
+  TerminexCursor(visible: true, blinking: true, shape: tcsBlock)
 
 func cellIndex[Cell, Line, Scrollback](
-    screen: TerminalScreen[Cell, Line, Scrollback], row, column: int
+    screen: TerminexScreen[Cell, Line, Scrollback], row, column: int
 ): int =
   ((screen.rowOrigin + row) mod screen.rows) * screen.columns + column
 
 func contains*[Cell, Line, Scrollback](
-    screen: TerminalScreen[Cell, Line, Scrollback], position: TerminalPosition
+    screen: TerminexScreen[Cell, Line, Scrollback], position: TerminexPosition
 ): bool =
   position.row in 0 ..< screen.rows and position.column in 0 ..< screen.columns
 
 func cellAt*[Cell, Line, Scrollback](
-    screen: TerminalScreen[Cell, Line, Scrollback], row, column: int
+    screen: TerminexScreen[Cell, Line, Scrollback], row, column: int
 ): lent Cell =
   screen.cells[screen.cellIndex(row, column)]
 
 func lineAt*[Cell, Line, Scrollback](
-    screen: TerminalScreen[Cell, Line, Scrollback], row: int
+    screen: TerminexScreen[Cell, Line, Scrollback], row: int
 ): Line =
   mixin initTerminalLine, `[]=`
   result = initTerminalLine(Line, screen.columns)
@@ -252,29 +252,29 @@ func lineAt*[Cell, Line, Scrollback](
     result[column] = screen.cellAt(row, column)
 
 iterator scrollbackLines*[Cell, Line, Scrollback](
-    screen: TerminalScreen[Cell, Line, Scrollback]
+    screen: TerminexScreen[Cell, Line, Scrollback]
 ): Line =
   for index in 0 ..< screen.scrollback.len:
     yield screen.scrollback[index]
 
 func scrollbackCount*[Cell, Line, Scrollback](
-    screen: TerminalScreen[Cell, Line, Scrollback]
+    screen: TerminexScreen[Cell, Line, Scrollback]
 ): int =
   screen.scrollback.len
 
 func maxScrollback*[Cell, Line, Scrollback](
-    screen: TerminalScreen[Cell, Line, Scrollback]
+    screen: TerminexScreen[Cell, Line, Scrollback]
 ): int =
   screen.scrollback.cap
 
 func totalLineCount*[Cell, Line, Scrollback](
-    screen: TerminalScreen[Cell, Line, Scrollback]
+    screen: TerminexScreen[Cell, Line, Scrollback]
 ): int =
   ## Return the number of addressable scrollback and live-screen lines.
   screen.scrollback.len + screen.rows
 
 func lineAtAbsolute*[Cell, Line, Scrollback](
-    screen: TerminalScreen[Cell, Line, Scrollback], index: int
+    screen: TerminexScreen[Cell, Line, Scrollback], index: int
 ): Line =
   ## Return a line from the combined scrollback and live-screen history.
   ##
@@ -288,29 +288,29 @@ func lineAtAbsolute*[Cell, Line, Scrollback](
   screen.lineAt(index - screen.scrollback.len)
 
 func pendingReplies*[Cell, Line, Scrollback](
-    screen: TerminalScreen[Cell, Line, Scrollback]
+    screen: TerminexScreen[Cell, Line, Scrollback]
 ): seq[string] =
   screen.pendingReplies
 
 proc takePendingReplies*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback]
+    screen: var TerminexScreen[Cell, Line, Scrollback]
 ): seq[string] =
   result = move(screen.pendingReplies)
   screen.pendingReplies = @[]
 
 proc markChanged[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback]
+    screen: var TerminexScreen[Cell, Line, Scrollback]
 ) =
   inc screen.generation
 
 proc ringBell*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback]
+    screen: var TerminexScreen[Cell, Line, Scrollback]
 ) =
   inc screen.bellCount
   screen.markChanged()
 
 proc takeClipboardRequest*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback]
+    screen: var TerminexScreen[Cell, Line, Scrollback]
 ): string =
   ## Consume text requested by an OSC 52 clipboard-write sequence.
   if not screen.clipboardRequestPending:
@@ -319,22 +319,22 @@ proc takeClipboardRequest*[Cell, Line, Scrollback](
   screen.clipboardText
 
 proc resetTabStops[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback]
+    screen: var TerminexScreen[Cell, Line, Scrollback]
 ) =
   screen.tabStops = newSeq[bool](screen.columns)
   for column in 0 ..< screen.columns:
     screen.tabStops[column] = column > 0 and column mod 8 == 0
 
 proc initTerminalScreen*[
-    Cell: TerminalCellAdapter,
-    Line: TerminalLineAdapter[Cell],
-    Scrollback: TerminalScrollbackAdapter[Line],
+    Cell: TerminexCellAdapter,
+    Line: TerminexLineAdapter[Cell],
+    Scrollback: TerminexScrollbackAdapter[Line],
 ](
-    _: typedesc[TerminalScreen[Cell, Line, Scrollback]],
+    _: typedesc[TerminexScreen[Cell, Line, Scrollback]],
     columns = DefaultTerminalColumns,
     rows = DefaultTerminalRows,
     maxScrollback = DefaultTerminalScrollback,
-): TerminalScreen[Cell, Line, Scrollback] =
+): TerminexScreen[Cell, Line, Scrollback] =
   result.columns = max(columns, 1)
   result.rows = max(rows, 1)
   result.cells = newSeqWith(result.columns * result.rows, result.makeCell())
@@ -345,38 +345,38 @@ proc initTerminalScreen*[
   result.scrollBottom = result.rows - 1
   result.resetTabStops()
 
-proc initTerminalScreen*[Cell: TerminalCellAdapter](
+proc initTerminalScreen*[Cell: TerminexCellAdapter](
     _: typedesc[Cell],
     columns = DefaultTerminalColumns,
     rows = DefaultTerminalRows,
     maxScrollback = DefaultTerminalScrollback,
-): TerminalScreen[Cell, seq[Cell], seq[seq[Cell]]] =
+): TerminexScreen[Cell, seq[Cell], seq[seq[Cell]]] =
   ## Construct a custom-cell screen with sequence-backed lines and scrollback.
   initTerminalScreen(
-    TerminalScreen[Cell, seq[Cell], seq[seq[Cell]]], columns, rows, maxScrollback
+    TerminexScreen[Cell, seq[Cell], seq[seq[Cell]]], columns, rows, maxScrollback
   )
 
 proc initTerminalScreen*(
     columns = DefaultTerminalColumns,
     rows = DefaultTerminalRows,
     maxScrollback = DefaultTerminalScrollback,
-): TerminalScreen[TerminalCell, TerminalLine, seq[TerminalLine]] =
-  ## Construct the default `TerminalCell`/`TerminalLine` screen.
+): TerminexScreen[TerminexCell, TerminexLine, seq[TerminexLine]] =
+  ## Construct the default `TerminexCell`/`TerminexLine` screen.
   initTerminalScreen(
-    TerminalScreen[TerminalCell, TerminalLine, seq[TerminalLine]],
+    TerminexScreen[TerminexCell, TerminexLine, seq[TerminexLine]],
     columns,
     rows,
     maxScrollback,
   )
 
 proc setCell[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], row, column: int, cell: Cell
+    screen: var TerminexScreen[Cell, Line, Scrollback], row, column: int, cell: Cell
 ) =
   if screen.contains(initTerminalPosition(row, column)):
     screen.cells[screen.cellIndex(row, column)] = cell
 
 proc clearWideCell[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], row, column: int
+    screen: var TerminexScreen[Cell, Line, Scrollback], row, column: int
 ) =
   mixin cellContinuation
   if not screen.contains(initTerminalPosition(row, column)):
@@ -390,7 +390,7 @@ proc clearWideCell[Cell, Line, Scrollback](
     screen.setCell(row, column + 1, screen.makeCell())
 
 proc clearRange[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback],
+    screen: var TerminexScreen[Cell, Line, Scrollback],
     row, firstColumn, lastColumn: int,
 ) =
   if row notin 0 ..< screen.rows:
@@ -406,12 +406,12 @@ proc clearRange[Cell, Line, Scrollback](
     screen.setCell(row, column, screen.makeCell(style = screen.style))
 
 proc clearLine[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], row: int
+    screen: var TerminexScreen[Cell, Line, Scrollback], row: int
 ) =
   screen.clearRange(row, 0, screen.columns - 1)
 
 proc clearScrollback*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback]
+    screen: var TerminexScreen[Cell, Line, Scrollback]
 ) =
   ## Remove saved history without changing the live terminal screen.
   if screen.scrollback.len == 0:
@@ -420,12 +420,12 @@ proc clearScrollback*[Cell, Line, Scrollback](
   screen.markChanged()
 
 proc appendScrollback[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], line: sink Line
+    screen: var TerminexScreen[Cell, Line, Scrollback], line: sink Line
 ) =
   screen.scrollback.add(line)
 
 proc replaceLine[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], row: int, line: Line
+    screen: var TerminexScreen[Cell, Line, Scrollback], row: int, line: Line
 ) =
   mixin len, `[]`
   for column in 0 ..< screen.columns:
@@ -439,7 +439,7 @@ proc replaceLine[Cell, Line, Scrollback](
     )
 
 proc scrollUp*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], count = 1
+    screen: var TerminexScreen[Cell, Line, Scrollback], count = 1
 ) =
   let amount = min(max(count, 0), screen.scrollBottom - screen.scrollTop + 1)
   if screen.scrollTop == 0 and screen.scrollBottom == screen.rows - 1:
@@ -462,7 +462,7 @@ proc scrollUp*[Cell, Line, Scrollback](
     screen.markChanged()
 
 proc scrollDown*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], count = 1
+    screen: var TerminexScreen[Cell, Line, Scrollback], count = 1
 ) =
   let amount = min(max(count, 0), screen.scrollBottom - screen.scrollTop + 1)
   if screen.scrollTop == 0 and screen.scrollBottom == screen.rows - 1:
@@ -480,7 +480,7 @@ proc scrollDown*[Cell, Line, Scrollback](
     screen.markChanged()
 
 proc lineFeed*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback]
+    screen: var TerminexScreen[Cell, Line, Scrollback]
 ) =
   screen.wrapPending = false
   if screen.cursor.position.row == screen.scrollBottom:
@@ -490,7 +490,7 @@ proc lineFeed*[Cell, Line, Scrollback](
     screen.markChanged()
 
 proc reverseIndex*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback]
+    screen: var TerminexScreen[Cell, Line, Scrollback]
 ) =
   screen.wrapPending = false
   if screen.cursor.position.row == screen.scrollTop:
@@ -500,20 +500,20 @@ proc reverseIndex*[Cell, Line, Scrollback](
     screen.markChanged()
 
 proc carriageReturn*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback]
+    screen: var TerminexScreen[Cell, Line, Scrollback]
 ) =
   screen.cursor.position.column = 0
   screen.wrapPending = false
   screen.markChanged()
 
 proc nextLine*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback]
+    screen: var TerminexScreen[Cell, Line, Scrollback]
 ) =
   screen.lineFeed()
   screen.carriageReturn()
 
 proc backspace*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback]
+    screen: var TerminexScreen[Cell, Line, Scrollback]
 ) =
   screen.wrapPending = false
   if screen.cursor.position.column > 0:
@@ -521,7 +521,7 @@ proc backspace*[Cell, Line, Scrollback](
     screen.markChanged()
 
 proc horizontalTab*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback]
+    screen: var TerminexScreen[Cell, Line, Scrollback]
 ) =
   screen.wrapPending = false
   for column in screen.cursor.position.column + 1 ..< screen.columns:
@@ -533,12 +533,12 @@ proc horizontalTab*[Cell, Line, Scrollback](
   screen.markChanged()
 
 proc setTabStop*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback]
+    screen: var TerminexScreen[Cell, Line, Scrollback]
 ) =
   screen.tabStops[screen.cursor.position.column] = true
 
 proc clearTabStop*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], all = false
+    screen: var TerminexScreen[Cell, Line, Scrollback], all = false
 ) =
   if all:
     for tabStop in screen.tabStops.mitems:
@@ -557,7 +557,7 @@ proc terminalRuneWidth*(rune: Rune): int =
   else: 1
 
 proc insertCells*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], count = 1
+    screen: var TerminexScreen[Cell, Line, Scrollback], count = 1
 ) =
   let
     column = screen.cursor.position.column
@@ -576,7 +576,7 @@ proc insertCells*[Cell, Line, Scrollback](
   screen.markChanged()
 
 proc deleteCells*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], count = 1
+    screen: var TerminexScreen[Cell, Line, Scrollback], count = 1
 ) =
   let
     column = screen.cursor.position.column
@@ -597,14 +597,14 @@ proc deleteCells*[Cell, Line, Scrollback](
   screen.markChanged()
 
 proc eraseCells*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], count = 1
+    screen: var TerminexScreen[Cell, Line, Scrollback], count = 1
 ) =
   let last = min(screen.cursor.position.column + max(count, 1) - 1, screen.columns - 1)
   screen.clearRange(screen.cursor.position.row, screen.cursor.position.column, last)
   screen.markChanged()
 
 proc insertLines*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], count = 1
+    screen: var TerminexScreen[Cell, Line, Scrollback], count = 1
 ) =
   let row = screen.cursor.position.row
   if row notin screen.scrollTop .. screen.scrollBottom:
@@ -617,7 +617,7 @@ proc insertLines*[Cell, Line, Scrollback](
   screen.markChanged()
 
 proc deleteLines*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], count = 1
+    screen: var TerminexScreen[Cell, Line, Scrollback], count = 1
 ) =
   let row = screen.cursor.position.row
   if row notin screen.scrollTop .. screen.scrollBottom:
@@ -630,7 +630,7 @@ proc deleteLines*[Cell, Line, Scrollback](
   screen.markChanged()
 
 proc attachCombiningRune[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], text: string
+    screen: var TerminexScreen[Cell, Line, Scrollback], text: string
 ): bool =
   mixin cellText, `cellText=`, cellContinuation
   var
@@ -655,7 +655,7 @@ proc attachCombiningRune[Cell, Line, Scrollback](
   true
 
 proc writeText*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], text: string
+    screen: var TerminexScreen[Cell, Line, Scrollback], text: string
 ) =
   let runes = text.toRunes()
   if runes.len == 0:
@@ -695,14 +695,14 @@ proc writeText*[Cell, Line, Scrollback](
   screen.markChanged()
 
 proc repeatLastText*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], count = 1
+    screen: var TerminexScreen[Cell, Line, Scrollback], count = 1
 ) =
   if screen.lastPrintedText.len > 0:
     for _ in 0 ..< max(count, 1):
       screen.writeText(screen.lastPrintedText)
 
 proc moveCursor*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], row, column: int
+    screen: var TerminexScreen[Cell, Line, Scrollback], row, column: int
 ) =
   let rowMin = if screen.modes.origin: screen.scrollTop else: 0
   let rowMax =
@@ -717,7 +717,7 @@ proc moveCursor*[Cell, Line, Scrollback](
   screen.markChanged()
 
 proc moveCursorRelative*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], rows, columns: int
+    screen: var TerminexScreen[Cell, Line, Scrollback], rows, columns: int
 ) =
   let
     rowMin = if screen.modes.origin: screen.scrollTop else: 0
@@ -733,7 +733,7 @@ proc moveCursorRelative*[Cell, Line, Scrollback](
   screen.markChanged()
 
 proc eraseInLine*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], mode: int
+    screen: var TerminexScreen[Cell, Line, Scrollback], mode: int
 ) =
   case mode
   of 0:
@@ -749,7 +749,7 @@ proc eraseInLine*[Cell, Line, Scrollback](
   screen.markChanged()
 
 proc eraseInDisplay*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], mode: int
+    screen: var TerminexScreen[Cell, Line, Scrollback], mode: int
 ) =
   case mode
   of 0:
@@ -771,7 +771,7 @@ proc eraseInDisplay*[Cell, Line, Scrollback](
   screen.markChanged()
 
 proc setScrollRegion*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], top, bottom: int
+    screen: var TerminexScreen[Cell, Line, Scrollback], top, bottom: int
 ) =
   if top >= 0 and top < bottom and bottom < screen.rows:
     screen.scrollTop = top
@@ -782,9 +782,9 @@ proc setScrollRegion*[Cell, Line, Scrollback](
   screen.moveCursor(0, 0)
 
 proc saveCursor*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback]
+    screen: var TerminexScreen[Cell, Line, Scrollback]
 ) =
-  screen.saved = TerminalSavedState(
+  screen.saved = TerminexSavedState(
     cursor: screen.cursor,
     style: screen.style,
     modes: screen.modes,
@@ -792,7 +792,7 @@ proc saveCursor*[Cell, Line, Scrollback](
   )
 
 proc restoreCursor*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback]
+    screen: var TerminexScreen[Cell, Line, Scrollback]
 ) =
   screen.cursor = screen.saved.cursor
   screen.style = screen.saved.style
@@ -804,7 +804,7 @@ proc restoreCursor*[Cell, Line, Scrollback](
   screen.markChanged()
 
 proc useAlternateScreen*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], enabled, saveRestore: bool
+    screen: var TerminexScreen[Cell, Line, Scrollback], enabled, saveRestore: bool
 ) =
   if enabled == screen.alternateScreen:
     return
@@ -835,12 +835,12 @@ proc useAlternateScreen*[Cell, Line, Scrollback](
   screen.markChanged()
 
 proc queueReply*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], reply: sink string
+    screen: var TerminexScreen[Cell, Line, Scrollback], reply: sink string
 ) =
   screen.pendingReplies.add reply
 
 proc reset*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback]
+    screen: var TerminexScreen[Cell, Line, Scrollback]
 ) =
   let
     columns = screen.columns
@@ -848,12 +848,12 @@ proc reset*[Cell, Line, Scrollback](
     maxScrollback = screen.maxScrollback
     generation = screen.generation
   screen = initTerminalScreen(
-    TerminalScreen[Cell, Line, Scrollback], columns, rows, maxScrollback
+    TerminexScreen[Cell, Line, Scrollback], columns, rows, maxScrollback
   )
   screen.generation = generation + 1
 
 proc resizeLine[Cell, Line, Scrollback](
-    screen: TerminalScreen[Cell, Line, Scrollback], line: Line, columns: int
+    screen: TerminexScreen[Cell, Line, Scrollback], line: Line, columns: int
 ): Line =
   mixin initTerminalLine, len, `[]`, `[]=`, cellContinuation
   result = initTerminalLine(Line, columns)
@@ -865,7 +865,7 @@ proc resizeLine[Cell, Line, Scrollback](
     result[columns - 1] = screen.makeCell()
 
 proc resizeCells[Cell, Line, Scrollback](
-    screen: TerminalScreen[Cell, Line, Scrollback],
+    screen: TerminexScreen[Cell, Line, Scrollback],
     cells: seq[Cell],
     rowOrigin, oldColumns, oldRows, columns, rows: int,
 ): seq[Cell] =
@@ -880,7 +880,7 @@ proc resizeCells[Cell, Line, Scrollback](
       result[row * columns + column] = line[column]
 
 proc resize*[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], columns, rows: int
+    screen: var TerminexScreen[Cell, Line, Scrollback], columns, rows: int
 ) =
   let
     nextColumns = max(columns, 1)
@@ -920,7 +920,7 @@ func lineText[Line](line: Line): string =
   result = result.strip(leading = false, trailing = true, chars = {' '})
 
 func plainText*[Cell, Line, Scrollback](
-    screen: TerminalScreen[Cell, Line, Scrollback], includeScrollback = true
+    screen: TerminexScreen[Cell, Line, Scrollback], includeScrollback = true
 ): string =
   var lines: seq[string]
   if includeScrollback and not screen.alternateScreen:

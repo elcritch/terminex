@@ -1,13 +1,13 @@
 import std/[monotimes, os, sequtils, strutils, tempfiles, times, unittest]
 import terminex
 
-proc feed(screen: var TerminalScreen, parser: var TerminalParser, value: string) =
+proc feed(screen: var TerminexScreen, parser: var TerminexParser, value: string) =
   parser.feed(screen, value)
 
 type
   CustomCell = object
     glyph: string
-    format: TerminalStyle
+    format: TerminexStyle
     trailingHalf: bool
     initialized: bool
 
@@ -27,9 +27,9 @@ func cellText(cell: CustomCell): string =
 proc `cellText=`(cell: var CustomCell, text: string) =
   cell.glyph = text
 
-func cellStyle(cell: CustomCell): TerminalStyle =
+func cellStyle(cell: CustomCell): TerminexStyle =
   cell.format
-proc `cellStyle=`(cell: var CustomCell, style: TerminalStyle) =
+proc `cellStyle=`(cell: var CustomCell, style: TerminexStyle) =
   cell.format = style
 
 func cellContinuation(cell: CustomCell): bool =
@@ -60,12 +60,12 @@ proc setLen(scrollback: var CustomScrollback, length: int) =
   scrollback.saved.setLen(length)
 
 static:
-  doAssert CustomCell is TerminalCellAdapter
-  doAssert CustomLine is TerminalLineAdapter[CustomCell]
-  doAssert CustomScrollback is TerminalScrollbackAdapter[CustomLine]
+  doAssert CustomCell is TerminexCellAdapter
+  doAssert CustomLine is TerminexLineAdapter[CustomCell]
+  doAssert CustomScrollback is TerminexScrollbackAdapter[CustomLine]
 
 proc pollUntilExit(
-    session: TerminalSession, timeout = initDuration(seconds = 3)
+    session: TerminexSession, timeout = initDuration(seconds = 3)
 ): bool =
   let deadline = getMonoTime() + timeout
   while session.running() and getMonoTime() < deadline:
@@ -75,7 +75,7 @@ proc pollUntilExit(
   not session.running()
 
 proc pollUntilText(
-    session: TerminalSession, expected: string, timeout = initDuration(seconds = 3)
+    session: TerminexSession, expected: string, timeout = initDuration(seconds = 3)
 ): bool =
   let deadline = getMonoTime() + timeout
   while getMonoTime() < deadline:
@@ -88,7 +88,7 @@ suite "terminex terminal screen and parser":
   test "custom cell line and scrollback adapters drive the parser":
     var
       screen = initTerminalScreen(
-        TerminalScreen[CustomCell, CustomLine, CustomScrollback],
+        TerminexScreen[CustomCell, CustomLine, CustomScrollback],
         columns = 3,
         rows = 2,
         maxScrollback = 2,
@@ -452,7 +452,7 @@ suite "terminex terminal screen and parser":
 suite "terminex terminal sessions":
   test "custom terminal session owns a custom screen":
     let session = newTerminalSession(
-      TerminalScreen[CustomCell, CustomLine, CustomScrollback], columns = 6, rows = 2
+      TerminexScreen[CustomCell, CustomLine, CustomScrollback], columns = 6, rows = 2
     )
 
     session.processOutput("custom")
@@ -476,7 +476,7 @@ suite "terminex terminal sessions":
     check session.state == tssIdle
     check session.screen().plainText() == "plain green"
     check session.screen().cellAt(0, 6).style.foreground == indexedTerminalColor(2)
-    expect TerminalSessionError:
+    expect TerminexSessionError:
       session.write("input")
 
   when defined(posix):
@@ -582,6 +582,6 @@ suite "terminex terminal sessions":
   else:
     test "unsupported platforms report a catchable spawn error":
       let session = newTerminalSession()
-      expect TerminalSessionError:
+      expect TerminexSessionError:
         session.start()
       check session.state == tssFailed

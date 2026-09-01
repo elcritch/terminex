@@ -10,7 +10,7 @@ const
   ReplacementCharacter = "\xef\xbf\xbd"
 
 type
-  TerminalParserState* = enum
+  TerminexParserState* = enum
     tpsGround
     tpsEscape
     tpsCsi
@@ -20,13 +20,13 @@ type
     tpsStringEscape
     tpsCharset
 
-  TerminalParser* = object
-    state*: TerminalParserState
+  TerminexParser* = object
+    state*: TerminexParserState
     sequence: string
     incompleteUtf8: string
 
-func initTerminalParser*(): TerminalParser =
-  TerminalParser(state: tpsGround)
+func initTerminalParser*(): TerminexParser =
+  TerminexParser(state: tpsGround)
 
 func parameterValue(
     parameters: openArray[int], index, fallback: int, zeroIsFallback = true
@@ -57,7 +57,7 @@ proc parseParameters(value: string): seq[int] =
     result.add parseInt(parameter)
 
 proc applyExtendedColor(
-    color: var TerminalColor, parameters: openArray[int], index: var int
+    color: var TerminexColor, parameters: openArray[int], index: var int
 ) =
   if index + 1 >= parameters.len:
     inc index
@@ -83,7 +83,7 @@ proc applyExtendedColor(
     inc index, 2
 
 proc applyGraphicRendition[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], parameters: seq[int]
+    screen: var TerminexScreen[Cell, Line, Scrollback], parameters: seq[int]
 ) =
   var index = 0
   while index < parameters.len:
@@ -181,7 +181,7 @@ proc applyGraphicRendition[Cell, Line, Scrollback](
       inc index
 
 proc setPrivateMode[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], mode: int, enabled: bool
+    screen: var TerminexScreen[Cell, Line, Scrollback], mode: int, enabled: bool
 ) =
   case mode
   of 1:
@@ -226,7 +226,7 @@ proc setPrivateMode[Cell, Line, Scrollback](
     discard
 
 proc applyMode[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback],
+    screen: var TerminexScreen[Cell, Line, Scrollback],
     parameters: seq[int],
     privateMode, enabled: bool,
 ) =
@@ -237,7 +237,7 @@ proc applyMode[Cell, Line, Scrollback](
       screen.modes.insert = enabled
 
 proc setCursorStyle[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], value: int
+    screen: var TerminexScreen[Cell, Line, Scrollback], value: int
 ) =
   case value
   of 0, 1:
@@ -262,7 +262,7 @@ proc setCursorStyle[Cell, Line, Scrollback](
     discard
 
 proc processCsi[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], sequence: string
+    screen: var TerminexScreen[Cell, Line, Scrollback], sequence: string
 ) =
   if sequence.len == 0:
     return
@@ -369,7 +369,7 @@ proc processCsi[Cell, Line, Scrollback](
     discard
 
 proc processOsc[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], sequence: string
+    screen: var TerminexScreen[Cell, Line, Scrollback], sequence: string
 ) =
   let separator = sequence.find(';')
   if separator < 0:
@@ -411,7 +411,7 @@ proc processOsc[Cell, Line, Scrollback](
     discard
 
 proc processControl[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], character: char
+    screen: var TerminexScreen[Cell, Line, Scrollback], character: char
 ) =
   case character
   of '\x07':
@@ -428,7 +428,7 @@ proc processControl[Cell, Line, Scrollback](
     discard
 
 proc processEscape[Cell, Line, Scrollback](
-    screen: var TerminalScreen[Cell, Line, Scrollback], character: char
+    screen: var TerminexScreen[Cell, Line, Scrollback], character: char
 ) =
   case character
   of '7':
@@ -489,15 +489,15 @@ func validUtf8Sequence(value: string): bool =
   true
 
 proc finishOsc[Cell, Line, Scrollback](
-    parser: var TerminalParser, screen: var TerminalScreen[Cell, Line, Scrollback]
+    parser: var TerminexParser, screen: var TerminexScreen[Cell, Line, Scrollback]
 ) =
   screen.processOsc(parser.sequence)
   parser.sequence.setLen(0)
   parser.state = tpsGround
 
 proc feed*[Cell, Line, Scrollback](
-    parser: var TerminalParser,
-    screen: var TerminalScreen[Cell, Line, Scrollback],
+    parser: var TerminexParser,
+    screen: var TerminexScreen[Cell, Line, Scrollback],
     data: string,
 ) =
   var input =
@@ -616,5 +616,5 @@ proc feed*[Cell, Line, Scrollback](
       parser.state = tpsGround
     inc index
 
-proc reset*(parser: var TerminalParser) =
+proc reset*(parser: var TerminexParser) =
   parser = initTerminalParser()

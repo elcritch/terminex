@@ -29,27 +29,27 @@ echo session.screen.plainText()
 ```
 
 The input helpers turn frontend key, mouse, paste, and focus events into terminal
-bytes. `TerminalSpawnOptions.terminalProgram` defaults to `"Terminex"`; set it
+bytes. `TerminexSpawnOptions.terminalProgram` defaults to `"Terminex"`; set it
 to an empty string to omit `TERM_PROGRAM`.
 
 ## Custom screen storage
 
-`TerminalScreen` and `TerminalSession` can use application-owned cell, line,
-and scrollback types. The default remains `TerminalCell`, `TerminalLine`, and
-`seq[TerminalLine]`. Supply these small operations for custom types:
+`TerminexScreen` and `TerminexSession` can use application-owned cell, line,
+and scrollback types. The default remains `TerminexCell`, `TerminexLine`, and
+`seq[TerminexLine]`. Supply these small operations for custom types:
 
 - `initTerminalCell(CellType, text, style)`; `cellText`, `cellText=`;
   `cellStyle`, `cellStyle=`; and `cellContinuation`, `cellContinuation=`.
 - `initTerminalLine(LineType, length)`, `len`, `[]`, and `[]=` for lines.
 - `len`, `[]`, `[]=`, `add`, and `setLen` for scrollback.
 
-The exported `TerminalCellAdapter`, `TerminalLineAdapter[Cell]`, and
-`TerminalScrollbackAdapter[Line]` concepts enforce this complete contract at
+The exported `TerminexCellAdapter`, `TerminexLineAdapter[Cell]`, and
+`TerminexScrollbackAdapter[Line]` concepts enforce this complete contract at
 compile time. Accessors can live beside the application's types.
 
 When only the cell representation is custom, `initTerminalScreen(CellType)` and
 `newTerminalSession(CellType)` use `seq[CellType]` lines and sequence-backed
-scrollback automatically. Pass a fully specialized `TerminalScreen` type when
+scrollback automatically. Pass a fully specialized `TerminexScreen` type when
 customizing all three storage layers.
 
 ```nim
@@ -58,15 +58,15 @@ import terminex
 type
   Cell = object
     glyph: string
-    format: TerminalStyle
+    format: TerminexStyle
     continuation: bool
 
 func initTerminalCell(_: typedesc[Cell], text = "",
     style = initTerminalStyle()): Cell = Cell(glyph: text, format: style)
 func cellText(cell: Cell): string = cell.glyph
 proc `cellText=`(cell: var Cell, text: string) = cell.glyph = text
-func cellStyle(cell: Cell): TerminalStyle = cell.format
-proc `cellStyle=`(cell: var Cell, style: TerminalStyle) = cell.format = style
+func cellStyle(cell: Cell): TerminexStyle = cell.format
+proc `cellStyle=`(cell: var Cell, style: TerminexStyle) = cell.format = style
 func cellContinuation(cell: Cell): bool = cell.continuation
 proc `cellContinuation=`(cell: var Cell, value: bool) = cell.continuation = value
 

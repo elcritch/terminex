@@ -5,13 +5,13 @@ import std/[strutils, unicode]
 import ./termscreen
 
 type
-  TerminalModifier* = enum
+  TerminexModifier* = enum
     tmShift
     tmControl
     tmAlt
     tmSuper
 
-  TerminalKey* = enum
+  TerminexKey* = enum
     tkUnknown
     tkA
     tkB
@@ -106,24 +106,24 @@ type
     tkMultiply
     tkDivide
 
-  TerminalKeyEvent* = object
-    key*: TerminalKey
+  TerminexKeyEvent* = object
+    key*: TerminexKey
     text*: string
-    modifiers*: set[TerminalModifier]
+    modifiers*: set[TerminexModifier]
 
-  TerminalMouseButton* = enum
+  TerminexMouseButton* = enum
     tmbPrimary
     tmbMiddle
     tmbSecondary
     tmbWheelUp
     tmbWheelDown
 
-  TerminalMouseEventKind* = enum
+  TerminexMouseEventKind* = enum
     tmekPress
     tmekRelease
     tmekMotion
 
-func controlCharacter(event: TerminalKeyEvent): string =
+func controlCharacter(event: TerminexKeyEvent): string =
   if event.key in tkA .. tkZ:
     return $char(ord(event.key) - ord(tkA) + 1)
   case event.key
@@ -136,7 +136,7 @@ func controlCharacter(event: TerminalKeyEvent): string =
   of tkBackspace: "\x7f"
   else: ""
 
-func functionKeyInput(key: TerminalKey): string =
+func functionKeyInput(key: TerminexKey): string =
   case key
   of tkF1: "\x1bOP"
   of tkF2: "\x1bOQ"
@@ -155,7 +155,7 @@ func functionKeyInput(key: TerminalKey): string =
   of tkF15: "\x1b[28~"
   else: ""
 
-func printableKeyText(event: TerminalKeyEvent): string =
+func printableKeyText(event: TerminexKeyEvent): string =
   let shifted = tmShift in event.modifiers
   if event.key in tkA .. tkZ:
     let letter = char(ord(event.key) - ord(tkA) + ord('a'))
@@ -221,7 +221,7 @@ func printableKeyText(event: TerminalKeyEvent): string =
     discard
 
 func terminalKeyInput*(
-    event: TerminalKeyEvent, modes: TerminalModes, altAsMeta = true
+    event: TerminexKeyEvent, modes: TerminexModes, altAsMeta = true
 ): string =
   ## Translate a frontend-neutral key event into xterm-compatible bytes.
   if tmSuper in event.modifiers:
@@ -269,21 +269,21 @@ func terminalKeyInput*(
   if altAsMeta and tmAlt in event.modifiers and result.len > 0:
     result = "\x1b" & result
 
-func terminalPasteInput*(text: string, modes: TerminalModes): string =
+func terminalPasteInput*(text: string, modes: TerminexModes): string =
   ## Wrap pasted text when the application has enabled bracketed paste mode.
   if modes.bracketedPaste:
     "\x1b[200~" & text & "\x1b[201~"
   else:
     text
 
-func terminalFocusInput*(focused: bool, modes: TerminalModes): string =
+func terminalFocusInput*(focused: bool, modes: TerminexModes): string =
   ## Encode a focus change when the application has enabled focus reporting.
   if modes.focusReporting:
     if focused: "\x1b[I" else: "\x1b[O"
   else:
     ""
 
-func mouseTrackingAccepts*(modes: TerminalModes, kind: TerminalMouseEventKind): bool =
+func mouseTrackingAccepts*(modes: TerminexModes, kind: TerminexMouseEventKind): bool =
   ## Report whether the active mouse-tracking mode accepts an event kind.
   case modes.mouseTracking
   of tmtNone:
@@ -293,7 +293,7 @@ func mouseTrackingAccepts*(modes: TerminalModes, kind: TerminalMouseEventKind): 
   of tmtButton, tmtAny:
     kind in {tmekPress, tmekRelease, tmekMotion}
 
-func mouseModifierCode(modifiers: set[TerminalModifier]): int =
+func mouseModifierCode(modifiers: set[TerminexModifier]): int =
   if tmShift in modifiers:
     result += 4
   if tmAlt in modifiers:
@@ -301,7 +301,7 @@ func mouseModifierCode(modifiers: set[TerminalModifier]): int =
   if tmControl in modifiers:
     result += 16
 
-func mouseButtonCode(button: TerminalMouseButton): int =
+func mouseButtonCode(button: TerminexMouseButton): int =
   case button
   of tmbPrimary: 0
   of tmbMiddle: 1
@@ -310,10 +310,10 @@ func mouseButtonCode(button: TerminalMouseButton): int =
   of tmbWheelDown: 65
 
 func encodeTerminalMouseInput*(
-    modes: TerminalModes,
+    modes: TerminexModes,
     columns, rows, row, column: int,
-    button: TerminalMouseButton,
-    modifiers: set[TerminalModifier] = {},
+    button: TerminexMouseButton,
+    modifiers: set[TerminexModifier] = {},
     release = false,
     motion = false,
 ): string =

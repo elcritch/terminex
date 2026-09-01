@@ -29,73 +29,73 @@ suite "terminex terminal input":
       ]
 
     for (key, expected) in specialInputs:
-      check terminalKeyInput(TerminalKeyEvent(key: key), modes) == expected
+      check terminalKeyInput(TerminexKeyEvent(key: key), modes) == expected
     for key in tkA .. tkZ:
       let expected = $char(key.ord - tkA.ord + 1)
-      check terminalKeyInput(TerminalKeyEvent(key: key, modifiers: {tmControl}), modes) ==
+      check terminalKeyInput(TerminexKeyEvent(key: key, modifiers: {tmControl}), modes) ==
         expected
     for index, expected in functionInputs:
-      let key = TerminalKey(tkF1.ord + index)
-      check terminalKeyInput(TerminalKeyEvent(key: key), modes) == expected
+      let key = TerminexKey(tkF1.ord + index)
+      check terminalKeyInput(TerminexKeyEvent(key: key), modes) == expected
 
     check terminalKeyInput(
-      TerminalKeyEvent(key: tkSpace, modifiers: {tmControl}), modes
+      TerminexKeyEvent(key: tkSpace, modifiers: {tmControl}), modes
     ) == "\x00"
-    check terminalKeyInput(TerminalKeyEvent(key: tk2, modifiers: {tmControl}), modes) ==
+    check terminalKeyInput(TerminexKeyEvent(key: tk2, modifiers: {tmControl}), modes) ==
       "\x00"
     check terminalKeyInput(
-      TerminalKeyEvent(key: tkLeftBracket, modifiers: {tmControl}), modes
+      TerminexKeyEvent(key: tkLeftBracket, modifiers: {tmControl}), modes
     ) == "\x1b"
     check terminalKeyInput(
-      TerminalKeyEvent(key: tkBackslash, modifiers: {tmControl}), modes
+      TerminexKeyEvent(key: tkBackslash, modifiers: {tmControl}), modes
     ) == "\x1c"
     check terminalKeyInput(
-      TerminalKeyEvent(key: tkRightBracket, modifiers: {tmControl}), modes
+      TerminexKeyEvent(key: tkRightBracket, modifiers: {tmControl}), modes
     ) == "\x1d"
-    check terminalKeyInput(TerminalKeyEvent(key: tk6, modifiers: {tmControl}), modes) ==
+    check terminalKeyInput(TerminexKeyEvent(key: tk6, modifiers: {tmControl}), modes) ==
       "\x1e"
     check terminalKeyInput(
-      TerminalKeyEvent(key: tkMinus, modifiers: {tmControl}), modes
+      TerminexKeyEvent(key: tkMinus, modifiers: {tmControl}), modes
     ) == "\x1f"
     check terminalKeyInput(
-      TerminalKeyEvent(key: tkBackspace, modifiers: {tmControl}), modes
+      TerminexKeyEvent(key: tkBackspace, modifiers: {tmControl}), modes
     ) == "\x7f"
-    check terminalKeyInput(TerminalKeyEvent(key: tkTab, modifiers: {tmShift}), modes) ==
+    check terminalKeyInput(TerminexKeyEvent(key: tkTab, modifiers: {tmShift}), modes) ==
       "\x1b[Z"
     check terminalKeyInput(
-      TerminalKeyEvent(key: tkX, text: "x", modifiers: {tmAlt}), modes
+      TerminexKeyEvent(key: tkX, text: "x", modifiers: {tmAlt}), modes
     ) == "\x1bx"
     check terminalKeyInput(
-      TerminalKeyEvent(key: tkF, text: "ƒ", modifiers: {tmAlt}), modes
+      TerminexKeyEvent(key: tkF, text: "ƒ", modifiers: {tmAlt}), modes
     ) == "\x1bf"
     check terminalKeyInput(
-      TerminalKeyEvent(key: tkF, text: "ƒ", modifiers: {tmAlt}),
+      TerminexKeyEvent(key: tkF, text: "ƒ", modifiers: {tmAlt}),
       modes,
       altAsMeta = false,
     ).len == 0
     check terminalKeyInput(
-      TerminalKeyEvent(key: tkF, modifiers: {tmControl, tmAlt}), modes
+      TerminexKeyEvent(key: tkF, modifiers: {tmControl, tmAlt}), modes
     ) == "\x1b\x06"
     check terminalKeyInput(
-      TerminalKeyEvent(key: tkX, text: "X", modifiers: {tmShift}), modes
+      TerminexKeyEvent(key: tkX, text: "X", modifiers: {tmShift}), modes
     ) == "X"
     check terminalKeyInput(
-      TerminalKeyEvent(key: tkC, text: "c", modifiers: {tmSuper}), modes
+      TerminexKeyEvent(key: tkC, text: "c", modifiers: {tmSuper}), modes
     ).len == 0
-    check terminalKeyInput(TerminalKeyEvent(key: tkUnknown), modes).len == 0
+    check terminalKeyInput(TerminexKeyEvent(key: tkUnknown), modes).len == 0
 
     var applicationModes = modes
     applicationModes.applicationCursorKeys = true
-    check terminalKeyInput(TerminalKeyEvent(key: tkArrowUp), applicationModes) ==
+    check terminalKeyInput(TerminexKeyEvent(key: tkArrowUp), applicationModes) ==
       "\x1bOA"
-    check terminalKeyInput(TerminalKeyEvent(key: tkArrowDown), applicationModes) ==
+    check terminalKeyInput(TerminexKeyEvent(key: tkArrowDown), applicationModes) ==
       "\x1bOB"
-    check terminalKeyInput(TerminalKeyEvent(key: tkArrowRight), applicationModes) ==
+    check terminalKeyInput(TerminexKeyEvent(key: tkArrowRight), applicationModes) ==
       "\x1bOC"
-    check terminalKeyInput(TerminalKeyEvent(key: tkArrowLeft), applicationModes) ==
+    check terminalKeyInput(TerminexKeyEvent(key: tkArrowLeft), applicationModes) ==
       "\x1bOD"
-    check terminalKeyInput(TerminalKeyEvent(key: tkHome), applicationModes) == "\x1bOH"
-    check terminalKeyInput(TerminalKeyEvent(key: tkEnd), applicationModes) == "\x1bOF"
+    check terminalKeyInput(TerminexKeyEvent(key: tkHome), applicationModes) == "\x1bOH"
+    check terminalKeyInput(TerminexKeyEvent(key: tkEnd), applicationModes) == "\x1bOF"
 
   test "paste and focus input honor the active terminal modes":
     var modes = initTerminalModes()
@@ -111,7 +111,7 @@ suite "terminex terminal input":
 
   test "mouse tracking and encoding follow xterm modes":
     var modes = initTerminalModes()
-    for kind in TerminalMouseEventKind:
+    for kind in TerminexMouseEventKind:
       check not modes.mouseTrackingAccepts(kind)
 
     modes.mouseTracking = tmtX10
@@ -120,7 +120,7 @@ suite "terminex terminal input":
     check not modes.mouseTrackingAccepts(tmekMotion)
 
     modes.mouseTracking = tmtButton
-    for kind in TerminalMouseEventKind:
+    for kind in TerminexMouseEventKind:
       check modes.mouseTrackingAccepts(kind)
 
     modes.mouseEncoding = tmeSgr
