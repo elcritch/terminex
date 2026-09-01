@@ -36,21 +36,26 @@ to an empty string to omit `TERM_PROGRAM`.
 
 `TerminexScreen` and `TerminexSession` can use application-owned cell, line,
 and scrollback types. The default remains `TerminexCell`, `TerminexLine`, and
-`seq[TerminexLine]`. Supply these small operations for custom types:
+`RingBuffer[TerminexLine]`. Supply these small operations for custom types:
 
 - `initTerminalCell(CellType, text, style)`; `cellText`, `cellText=`;
   `cellStyle`, `cellStyle=`; and `cellContinuation`, `cellContinuation=`.
 - `initTerminalLine(LineType, length)`, `len`, `[]`, and `[]=` for lines.
-- `len`, `[]`, `[]=`, `add`, and `setLen` for scrollback.
+- `initScrollback(ScrollbackType, capacity)`, `len`, `items`, `add`, and
+  `clear` for scrollback.
 
 The exported `TerminexCellAdapter`, `TerminexLineAdapter[Cell]`, and
 `TerminexScrollbackAdapter[Line]` concepts enforce this complete contract at
-compile time. Accessors can live beside the application's types.
+compile time. A custom scrollback's `add` operation owns its retention policy
+and must honor the capacity received by `initScrollback`. This permits linked
+lists and other containers that do not provide random access.
 
 When only the cell representation is custom, `initTerminalScreen(CellType)` and
-`newTerminalSession(CellType)` use `seq[CellType]` lines and sequence-backed
-scrollback automatically. Pass a fully specialized `TerminexScreen` type when
-customizing all three storage layers.
+`newTerminalSession(CellType)` use `seq[CellType]` lines and
+`RingBuffer[seq[CellType]]` scrollback automatically. Pass a fully specialized
+`TerminexScreen` type when customizing all three storage layers.
+`RingBufferWithStorage[Item, Storage]` supports custom sequence-compatible
+backing stores through `RingBufferStorageAdapter[Item]`.
 
 ```nim
 import terminex

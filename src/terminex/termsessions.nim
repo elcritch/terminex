@@ -5,7 +5,7 @@ import std/os
 when defined(posix):
   import std/[posix, tables]
 
-import ./[termparser, termscreen]
+import ./[ringbuffer, termparser, termscreen]
 
 const
   DefaultTerminalReadLimit* = 1024 * 1024
@@ -63,7 +63,11 @@ type
       xMasterFd: cint
       xChildPid: Pid
 
-  TerminexSession*[Cell = TerminexCell, Line = seq[Cell], Scrollback = seq[Line]] = ref TerminexSessionObj[
+  TerminexSession*[
+    Cell = TerminexCell,
+    Line = seq[Cell],
+    Scrollback = RingBuffer[Line],
+  ] = ref TerminexSessionObj[
     Cell, Line, Scrollback
   ]
 
@@ -185,19 +189,19 @@ proc newTerminalSession*[Cell: TerminexCellAdapter](
     columns = DefaultTerminalColumns,
     rows = DefaultTerminalRows,
     maxScrollback = DefaultTerminalScrollback,
-): TerminexSession[Cell, seq[Cell], seq[seq[Cell]]] =
-  ## Construct a custom-cell session with sequence-backed lines and scrollback.
+): TerminexSession[Cell, seq[Cell], RingBuffer[seq[Cell]]] =
+  ## Construct a custom-cell session with sequence-backed lines and ring scrollback.
   newTerminalSession(
-    TerminexScreen[Cell, seq[Cell], seq[seq[Cell]]], columns, rows, maxScrollback
+    TerminexScreen[Cell, seq[Cell], RingBuffer[seq[Cell]]], columns, rows, maxScrollback
   )
 
 proc newTerminalSession*(
     columns = DefaultTerminalColumns,
     rows = DefaultTerminalRows,
     maxScrollback = DefaultTerminalScrollback,
-): TerminexSession[TerminexCell, TerminexLine, seq[TerminexLine]] =
+): TerminexSession[TerminexCell, TerminexLine, RingBuffer[TerminexLine]] =
   newTerminalSession(
-    TerminexScreen[TerminexCell, TerminexLine, seq[TerminexLine]],
+    TerminexScreen[TerminexCell, TerminexLine, RingBuffer[TerminexLine]],
     columns,
     rows,
     maxScrollback,
@@ -414,10 +418,10 @@ proc spawnTerminalSession*[Cell: TerminexCellAdapter](
     columns = DefaultTerminalColumns,
     rows = DefaultTerminalRows,
     maxScrollback = DefaultTerminalScrollback,
-): TerminexSession[Cell, seq[Cell], seq[seq[Cell]]] =
-  ## Spawn a custom-cell session with sequence-backed lines and scrollback.
+): TerminexSession[Cell, seq[Cell], RingBuffer[seq[Cell]]] =
+  ## Spawn a custom-cell session with sequence-backed lines and ring scrollback.
   spawnTerminalSession(
-    TerminexScreen[Cell, seq[Cell], seq[seq[Cell]]],
+    TerminexScreen[Cell, seq[Cell], RingBuffer[seq[Cell]]],
     options,
     columns,
     rows,
@@ -429,9 +433,9 @@ proc spawnTerminalSession*(
     columns = DefaultTerminalColumns,
     rows = DefaultTerminalRows,
     maxScrollback = DefaultTerminalScrollback,
-): TerminexSession[TerminexCell, TerminexLine, seq[TerminexLine]] =
+): TerminexSession[TerminexCell, TerminexLine, RingBuffer[TerminexLine]] =
   spawnTerminalSession(
-    TerminexScreen[TerminexCell, TerminexLine, seq[TerminexLine]],
+    TerminexScreen[TerminexCell, TerminexLine, RingBuffer[TerminexLine]],
     options,
     columns,
     rows,

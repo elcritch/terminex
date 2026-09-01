@@ -67,7 +67,7 @@ suite "terminex ring buffer":
     check toSeq(buffer.items) == @[4]
 
   test "custom sequence-like storage backs the ring":
-    var buffer = initRingBuffer(RingBuffer[string, CustomStorage[string]], 2)
+    var buffer = initRingBuffer(RingBufferWithStorage[string, CustomStorage[string]], 2)
 
     buffer.add("a")
     buffer.add("b")

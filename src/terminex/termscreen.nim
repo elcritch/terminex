@@ -119,13 +119,28 @@ type
         line[0] is Cell
         writable[0] = line[0]
 
-  TerminexScrollbackAdapter*[Line] = RingBufferStorageAdapter[Line]
+  ## A bounded scrollback container accepted by `TerminexScreen`.
+  ##
+  ## `initScrollback` receives the maximum retained line count. The container's
+  ## `add` implementation is responsible for enforcing that capacity.
+  TerminexScrollbackAdapter*[Line] =
+    concept scrollback
+        mixin initScrollback, len, items, add, clear
+        var writable: typeof(scrollback)
+        var storedLine: Line
+        initScrollback(typeof(scrollback), 0) is typeof(scrollback)
+        scrollback.len is int
+        for item in scrollback:
+          item is Line
+        writable.add(storedLine)
+        writable.clear()
 
-  TerminexScreen*[Cell = TerminexCell, Line = seq[Cell], Scrollback = seq[Line]] = object
+  TerminexScreen*[Cell = TerminexCell, Line = seq[Cell], Scrollback = RingBuffer[Line]] = object
     columns*, rows*: int
     cells: seq[Cell]
-    scrollback: RingBuffer[Line, Scrollback]
+    scrollback: Scrollback
     rowOrigin: int
+    maxScrollback*: int
     cursor*: TerminexCursor
     style*: TerminexStyle
     modes*: TerminexModes
@@ -205,6 +220,12 @@ proc `cellContinuation=`*(cell: var TerminexCell, continuation: bool) =
 func initTerminalLine*[Cell](_: typedesc[seq[Cell]], length: int): seq[Cell] =
   newSeq[Cell](length)
 
+func initScrollback*[Line; Storage: RingBufferStorageAdapter[Line]](
+    _: typedesc[RingBufferWithStorage[Line, Storage]], capacity: int
+): RingBufferWithStorage[Line, Storage] =
+  ## Initialize the default bounded scrollback implementation.
+  initRingBuffer(RingBufferWithStorage[Line, Storage], capacity)
+
 template makeCell(
     screen: typed, text = "", style = initTerminalStyle(), continuation = false
 ): untyped =
@@ -217,7 +238,7 @@ template makeCell(
 static:
   doAssert TerminexCell is TerminexCellAdapter
   doAssert TerminexLine is TerminexLineAdapter[TerminexCell]
-  doAssert seq[TerminexLine] is TerminexScrollbackAdapter[TerminexLine]
+  doAssert RingBuffer[TerminexLine] is TerminexScrollbackAdapter[TerminexLine]
 
 func initTerminalPosition*(row, column: int): TerminexPosition =
   TerminexPosition(row: row, column: column)
@@ -254,23 +275,21 @@ func lineAt*[Cell, Line, Scrollback](
 iterator scrollbackLines*[Cell, Line, Scrollback](
     screen: TerminexScreen[Cell, Line, Scrollback]
 ): Line =
-  for index in 0 ..< screen.scrollback.len:
-    yield screen.scrollback[index]
+  mixin items
+  for storedLine in screen.scrollback:
+    yield storedLine
 
 func scrollbackCount*[Cell, Line, Scrollback](
     screen: TerminexScreen[Cell, Line, Scrollback]
 ): int =
+  mixin len
   screen.scrollback.len
-
-func maxScrollback*[Cell, Line, Scrollback](
-    screen: TerminexScreen[Cell, Line, Scrollback]
-): int =
-  screen.scrollback.cap
 
 func totalLineCount*[Cell, Line, Scrollback](
     screen: TerminexScreen[Cell, Line, Scrollback]
 ): int =
   ## Return the number of addressable scrollback and live-screen lines.
+  mixin len
   screen.scrollback.len + screen.rows
 
 func lineAtAbsolute*[Cell, Line, Scrollback](
@@ -280,11 +299,16 @@ func lineAtAbsolute*[Cell, Line, Scrollback](
   ##
   ## Scrollback occupies the first indexes and the current screen the last
   ## `rows` indexes. An out-of-range index returns an empty line.
-  mixin initTerminalLine
+  mixin initTerminalLine, len, items
   if index < 0 or index >= screen.totalLineCount():
     return initTerminalLine(Line, 0)
   if index < screen.scrollback.len:
-    return screen.scrollback[index]
+    var currentIndex = 0
+    for storedLine in screen.scrollback:
+      if currentIndex == index:
+        return storedLine
+      inc currentIndex
+    return initTerminalLine(Line, 0)
   screen.lineAt(index - screen.scrollback.len)
 
 func pendingReplies*[Cell, Line, Scrollback](
@@ -335,10 +359,12 @@ proc initTerminalScreen*[
     rows = DefaultTerminalRows,
     maxScrollback = DefaultTerminalScrollback,
 ): TerminexScreen[Cell, Line, Scrollback] =
+  mixin initScrollback
   result.columns = max(columns, 1)
   result.rows = max(rows, 1)
   result.cells = newSeqWith(result.columns * result.rows, result.makeCell())
-  result.scrollback = initRingBuffer(RingBuffer[Line, Scrollback], maxScrollback)
+  result.maxScrollback = max(maxScrollback, 0)
+  result.scrollback = initScrollback(Scrollback, result.maxScrollback)
   result.cursor = initTerminalCursor()
   result.style = initTerminalStyle()
   result.modes = initTerminalModes()
@@ -350,20 +376,20 @@ proc initTerminalScreen*[Cell: TerminexCellAdapter](
     columns = DefaultTerminalColumns,
     rows = DefaultTerminalRows,
     maxScrollback = DefaultTerminalScrollback,
-): TerminexScreen[Cell, seq[Cell], seq[seq[Cell]]] =
-  ## Construct a custom-cell screen with sequence-backed lines and scrollback.
+): TerminexScreen[Cell, seq[Cell], RingBuffer[seq[Cell]]] =
+  ## Construct a custom-cell screen with sequence-backed lines and ring scrollback.
   initTerminalScreen(
-    TerminexScreen[Cell, seq[Cell], seq[seq[Cell]]], columns, rows, maxScrollback
+    TerminexScreen[Cell, seq[Cell], RingBuffer[seq[Cell]]], columns, rows, maxScrollback
   )
 
 proc initTerminalScreen*(
     columns = DefaultTerminalColumns,
     rows = DefaultTerminalRows,
     maxScrollback = DefaultTerminalScrollback,
-): TerminexScreen[TerminexCell, TerminexLine, seq[TerminexLine]] =
+): TerminexScreen[TerminexCell, TerminexLine, RingBuffer[TerminexLine]] =
   ## Construct the default `TerminexCell`/`TerminexLine` screen.
   initTerminalScreen(
-    TerminexScreen[TerminexCell, TerminexLine, seq[TerminexLine]],
+    TerminexScreen[TerminexCell, TerminexLine, RingBuffer[TerminexLine]],
     columns,
     rows,
     maxScrollback,
@@ -414,6 +440,7 @@ proc clearScrollback*[Cell, Line, Scrollback](
     screen: var TerminexScreen[Cell, Line, Scrollback]
 ) =
   ## Remove saved history without changing the live terminal screen.
+  mixin len, clear
   if screen.scrollback.len == 0:
     return
   screen.scrollback.clear()
@@ -422,6 +449,7 @@ proc clearScrollback*[Cell, Line, Scrollback](
 proc appendScrollback[Cell, Line, Scrollback](
     screen: var TerminexScreen[Cell, Line, Scrollback], line: sink Line
 ) =
+  mixin add
   screen.scrollback.add(line)
 
 proc replaceLine[Cell, Line, Scrollback](
@@ -922,10 +950,11 @@ func lineText[Line](line: Line): string =
 func plainText*[Cell, Line, Scrollback](
     screen: TerminexScreen[Cell, Line, Scrollback], includeScrollback = true
 ): string =
+  mixin len, items
   var lines: seq[string]
   if includeScrollback and not screen.alternateScreen:
-    for index in 0 ..< screen.scrollback.len:
-      lines.add screen.lineAtAbsolute(index).lineText()
+    for storedLine in screen.scrollback:
+      lines.add storedLine.lineText()
   var lastContentRow = -1
   for row in 0 ..< screen.rows:
     let text = screen.lineAt(row).lineText()

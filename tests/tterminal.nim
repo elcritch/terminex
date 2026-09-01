@@ -16,6 +16,7 @@ type
 
   CustomScrollback = object
     saved: seq[CustomLine]
+    capacity: int
 
 func initTerminalCell(
     _: typedesc[CustomCell], text = "", style = initTerminalStyle()
@@ -46,18 +47,25 @@ func `[]`(line: CustomLine, index: int): CustomCell =
 proc `[]=`(line: var CustomLine, index: int, cell: CustomCell) =
   line.slots[index] = cell
 
+func initScrollback(_: typedesc[CustomScrollback], capacity: int): CustomScrollback =
+  CustomScrollback(capacity: max(capacity, 0))
+
 func len(scrollback: CustomScrollback): int =
   scrollback.saved.len
-func `[]`(scrollback: CustomScrollback, index: int): CustomLine =
-  scrollback.saved[index]
-proc `[]=`(scrollback: var CustomScrollback, index: int, line: CustomLine) =
-  scrollback.saved[index] = line
 
-proc add(scrollback: var CustomScrollback, line: CustomLine) =
-  scrollback.saved.add line
+iterator items(scrollback: CustomScrollback): CustomLine =
+  for storedLine in scrollback.saved:
+    yield storedLine
 
-proc setLen(scrollback: var CustomScrollback, length: int) =
-  scrollback.saved.setLen(length)
+proc add(scrollback: var CustomScrollback, line: sink CustomLine) =
+  if scrollback.capacity == 0:
+    return
+  if scrollback.saved.len == scrollback.capacity:
+    scrollback.saved.delete(0)
+  scrollback.saved.add(line)
+
+proc clear(scrollback: var CustomScrollback) =
+  scrollback.saved.setLen(0)
 
 static:
   doAssert CustomCell is TerminexCellAdapter
@@ -116,7 +124,10 @@ suite "terminex terminal screen and parser":
     check screen.cellAt(0, 3).initialized
     check screen.cellAt(1, 4).initialized
 
-  test "custom cell shorthand uses sequence line and scrollback storage":
+    screen.clearScrollback()
+    check screen.scrollbackCount == 0
+
+  test "custom cell shorthand uses sequence lines and ring scrollback":
     var
       screen = initTerminalScreen(CustomCell, columns = 5, rows = 2)
       parser = initTerminalParser()
@@ -460,7 +471,7 @@ suite "terminex terminal sessions":
     check session.screen().cellAt(0, 0).glyph == "c"
     check session.screen().plainText() == "custom"
 
-  test "custom terminal session shorthand uses sequence storage":
+  test "custom terminal session shorthand uses sequence lines and ring scrollback":
     let session = newTerminalSession(CustomCell, columns = 6, rows = 2)
 
     session.processOutput("simple")
