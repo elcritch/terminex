@@ -82,7 +82,9 @@ proc applyExtendedColor(
   else:
     inc index, 2
 
-proc applyGraphicRendition(screen: var TerminalScreen, parameters: seq[int]) =
+proc applyGraphicRendition[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], parameters: seq[int]
+) =
   var index = 0
   while index < parameters.len:
     let code = parameters[index]
@@ -178,7 +180,9 @@ proc applyGraphicRendition(screen: var TerminalScreen, parameters: seq[int]) =
     else:
       inc index
 
-proc setPrivateMode(screen: var TerminalScreen, mode: int, enabled: bool) =
+proc setPrivateMode[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], mode: int, enabled: bool
+) =
   case mode
   of 1:
     screen.modes.applicationCursorKeys = enabled
@@ -221,8 +225,10 @@ proc setPrivateMode(screen: var TerminalScreen, mode: int, enabled: bool) =
   else:
     discard
 
-proc applyMode(
-    screen: var TerminalScreen, parameters: seq[int], privateMode, enabled: bool
+proc applyMode[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback],
+    parameters: seq[int],
+    privateMode, enabled: bool,
 ) =
   for mode in parameters:
     if privateMode:
@@ -230,7 +236,9 @@ proc applyMode(
     elif mode == 4:
       screen.modes.insert = enabled
 
-proc setCursorStyle(screen: var TerminalScreen, value: int) =
+proc setCursorStyle[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], value: int
+) =
   case value
   of 0, 1:
     screen.cursor.shape = tcsBlock
@@ -253,7 +261,9 @@ proc setCursorStyle(screen: var TerminalScreen, value: int) =
   else:
     discard
 
-proc processCsi(screen: var TerminalScreen, sequence: string) =
+proc processCsi[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], sequence: string
+) =
   if sequence.len == 0:
     return
   let
@@ -358,7 +368,9 @@ proc processCsi(screen: var TerminalScreen, sequence: string) =
   else:
     discard
 
-proc processOsc(screen: var TerminalScreen, sequence: string) =
+proc processOsc[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], sequence: string
+) =
   let separator = sequence.find(';')
   if separator < 0:
     return
@@ -398,7 +410,9 @@ proc processOsc(screen: var TerminalScreen, sequence: string) =
   else:
     discard
 
-proc processControl(screen: var TerminalScreen, character: char) =
+proc processControl[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], character: char
+) =
   case character
   of '\x07':
     screen.ringBell()
@@ -413,7 +427,9 @@ proc processControl(screen: var TerminalScreen, character: char) =
   else:
     discard
 
-proc processEscape(screen: var TerminalScreen, character: char) =
+proc processEscape[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], character: char
+) =
   case character
   of '7':
     screen.saveCursor()
@@ -472,12 +488,18 @@ func validUtf8Sequence(value: string): bool =
       return false
   true
 
-proc finishOsc(parser: var TerminalParser, screen: var TerminalScreen) =
+proc finishOsc[Cell, Line, Scrollback](
+    parser: var TerminalParser, screen: var TerminalScreen[Cell, Line, Scrollback]
+) =
   screen.processOsc(parser.sequence)
   parser.sequence.setLen(0)
   parser.state = tpsGround
 
-proc feed*(parser: var TerminalParser, screen: var TerminalScreen, data: string) =
+proc feed*[Cell, Line, Scrollback](
+    parser: var TerminalParser,
+    screen: var TerminalScreen[Cell, Line, Scrollback],
+    data: string,
+) =
   var input =
     if parser.incompleteUtf8.len > 0:
       parser.incompleteUtf8 & data

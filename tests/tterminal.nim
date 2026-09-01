@@ -4,6 +4,66 @@ import terminex
 proc feed(screen: var TerminalScreen, parser: var TerminalParser, value: string) =
   parser.feed(screen, value)
 
+type
+  CustomCell = object
+    glyph: string
+    format: TerminalStyle
+    trailingHalf: bool
+    initialized: bool
+
+  CustomLine = object
+    slots: seq[CustomCell]
+
+  CustomScrollback = object
+    saved: seq[CustomLine]
+
+func initTerminalCell(
+    _: typedesc[CustomCell], text = "", style = initTerminalStyle()
+): CustomCell =
+  CustomCell(glyph: text, format: style, initialized: true)
+
+func cellText(cell: CustomCell): string =
+  cell.glyph
+proc `cellText=`(cell: var CustomCell, text: string) =
+  cell.glyph = text
+
+func cellStyle(cell: CustomCell): TerminalStyle =
+  cell.format
+proc `cellStyle=`(cell: var CustomCell, style: TerminalStyle) =
+  cell.format = style
+
+func cellContinuation(cell: CustomCell): bool =
+  cell.trailingHalf
+proc `cellContinuation=`(cell: var CustomCell, value: bool) =
+  cell.trailingHalf = value
+
+func initTerminalLine(_: typedesc[CustomLine], length: int): CustomLine =
+  CustomLine(slots: newSeq[CustomCell](length))
+func len(line: CustomLine): int =
+  line.slots.len
+func `[]`(line: CustomLine, index: int): CustomCell =
+  line.slots[index]
+proc `[]=`(line: var CustomLine, index: int, cell: CustomCell) =
+  line.slots[index] = cell
+
+func len(scrollback: CustomScrollback): int =
+  scrollback.saved.len
+func `[]`(scrollback: CustomScrollback, index: int): CustomLine =
+  scrollback.saved[index]
+proc `[]=`(scrollback: var CustomScrollback, index: int, line: CustomLine) =
+  scrollback.saved[index] = line
+
+proc add(scrollback: var CustomScrollback, line: CustomLine) =
+  scrollback.saved.add line
+
+proc setLen(scrollback: var CustomScrollback, length: int) =
+  scrollback.saved.setLen(length)
+
+static:
+  doAssert CustomCell is TerminalCellAdapter
+  doAssert CustomLine is TerminalLineAdapter[CustomCell]
+  doAssert CustomScrollback is TerminalScrollbackAdapter[CustomLine]
+
 proc pollUntilExit(
     session: TerminalSession, timeout = initDuration(seconds = 3)
 ): bool =
@@ -25,6 +85,47 @@ proc pollUntilText(
     sleep(5)
 
 suite "terminex terminal screen and parser":
+  test "custom cell line and scrollback adapters drive the parser":
+    var
+      screen = initTerminalScreen(
+        TerminalScreen[CustomCell, CustomLine, CustomScrollback],
+        columns = 3,
+        rows = 2,
+        maxScrollback = 2,
+      )
+      parser = initTerminalParser()
+
+    parser.feed(screen, "A\x1b[31m日\r\nB\r\nC")
+
+    check screen.cellAt(0, 0).glyph == "B"
+    check screen.cellAt(0, 0).format.foreground == indexedTerminalColor(1)
+    check screen.scrollbackCount == 1
+    check screen.lineAtAbsolute(0)[0].glyph == "A"
+    check screen.lineAtAbsolute(0)[2].trailingHalf
+    check screen.lineAtAbsolute(-1).slots.len == 0
+    check screen.lineAtAbsolute(screen.totalLineCount()).slots.len == 0
+    check screen.plainText() == "A日\nB\nC"
+
+    parser.feed(screen, "\r\nD\r\nE")
+    check screen.scrollbackCount == 2
+    check screen.lineAtAbsolute(0)[0].glyph == "B"
+    check screen.lineAtAbsolute(1)[0].glyph == "C"
+    check screen.plainText() == "B\nC\nD\nE"
+
+    screen.resize(5, 2)
+    check screen.cellAt(0, 3).initialized
+    check screen.cellAt(1, 4).initialized
+
+  test "custom cell shorthand uses sequence line and scrollback storage":
+    var
+      screen = initTerminalScreen(CustomCell, columns = 5, rows = 2)
+      parser = initTerminalParser()
+
+    parser.feed(screen, "short")
+
+    check screen.cellAt(0, 0).glyph == "s"
+    check screen.lineAtAbsolute(-1).len == 0
+
   test "screen starts with bounded dimensions and terminal defaults":
     let screen = initTerminalScreen(0, -1, maxScrollback = -4)
 
@@ -349,6 +450,24 @@ suite "terminex terminal screen and parser":
     check screen.plainText() == "beforeafter"
 
 suite "terminex terminal sessions":
+  test "custom terminal session owns a custom screen":
+    let session = newTerminalSession(
+      TerminalScreen[CustomCell, CustomLine, CustomScrollback], columns = 6, rows = 2
+    )
+
+    session.processOutput("custom")
+
+    check session.screen().cellAt(0, 0).glyph == "c"
+    check session.screen().plainText() == "custom"
+
+  test "custom terminal session shorthand uses sequence storage":
+    let session = newTerminalSession(CustomCell, columns = 6, rows = 2)
+
+    session.processOutput("simple")
+
+    check session.screen().cellAt(0, 0).glyph == "s"
+    check session.screen().plainText() == "simple"
+
   test "session can parse supplied output before starting a process":
     let session = newTerminalSession(12, 2)
 

@@ -92,10 +92,47 @@ type
     modes: TerminalModes
     wrapPending: bool
 
-  TerminalScreen* = object
+  ## A cell implementation accepted by `TerminalScreen`. Custom cell types
+  ## supply the `initTerminalCell`, `cellText`, `cellStyle`, and
+  ## `cellContinuation` accessors documented below.
+  TerminalCellAdapter* =
+    concept cell
+        mixin initTerminalCell, cellText, cellStyle, cellContinuation
+        var writable: typeof(cell)
+        initTerminalCell(typeof(cell), "", initTerminalStyle()) is typeof(cell)
+        cellText(cell) is string
+        cellStyle(cell) is TerminalStyle
+        cellContinuation(cell) is bool
+        writable.cellText = ""
+        writable.cellStyle = initTerminalStyle()
+        writable.cellContinuation = false
+
+  ## A line implementation accepted by `TerminalScreen`.
+  TerminalLineAdapter*[Cell] =
+    concept line
+        mixin initTerminalLine, len, `[]`, `[]=`
+        var writable: typeof(line)
+        initTerminalLine(typeof(line), 1) is typeof(line)
+        line.len is int
+        line[0] is Cell
+        writable[0] = line[0]
+
+  ## A mutable, seq-compatible scrollback implementation. It must support
+  ## `len`, indexing, `add`, and `setLen` for its line type.
+  TerminalScrollbackAdapter*[Line] =
+    concept scrollback
+        mixin len, `[]`, `[]=`, add, setLen
+        var writable: typeof(scrollback)
+        scrollback.len is int
+        scrollback[0] is Line
+        writable[0] = scrollback[0]
+        writable.add scrollback[0]
+        writable.setLen(0)
+
+  TerminalScreen*[Cell = TerminalCell, Line = seq[Cell], Scrollback = seq[Line]] = object
     columns*, rows*: int
-    cells: seq[TerminalCell]
-    scrollback: seq[TerminalLine]
+    cells: seq[Cell]
+    scrollback: Scrollback
     scrollbackFirst: int
     rowOrigin: int
     maxScrollback*: int
@@ -112,7 +149,7 @@ type
     generation*: uint64
     tabStops: seq[bool]
     saved: TerminalSavedState
-    primaryCells: seq[TerminalCell]
+    primaryCells: seq[Cell]
     primaryRowOrigin: int
     primaryCursor: TerminalCursor
     primarySaved: TerminalSavedState
@@ -151,6 +188,47 @@ func initTerminalStyle*(): TerminalStyle =
 func initTerminalCell*(text = "", style = initTerminalStyle()): TerminalCell =
   TerminalCell(text: text, style: style)
 
+func initTerminalCell*(
+    _: typedesc[TerminalCell], text = "", style = initTerminalStyle()
+): TerminalCell =
+  ## Default custom-cell constructor used by `TerminalScreen`.
+  initTerminalCell(text, style)
+
+func cellText*(cell: TerminalCell): string =
+  cell.text
+
+proc `cellText=`*(cell: var TerminalCell, text: string) =
+  cell.text = text
+
+func cellStyle*(cell: TerminalCell): TerminalStyle =
+  cell.style
+
+proc `cellStyle=`*(cell: var TerminalCell, style: TerminalStyle) =
+  cell.style = style
+
+func cellContinuation*(cell: TerminalCell): bool =
+  cell.continuation
+
+proc `cellContinuation=`*(cell: var TerminalCell, continuation: bool) =
+  cell.continuation = continuation
+
+func initTerminalLine*[Cell](_: typedesc[seq[Cell]], length: int): seq[Cell] =
+  newSeq[Cell](length)
+
+template makeCell(
+    screen: typed, text = "", style = initTerminalStyle(), continuation = false
+): untyped =
+  mixin initTerminalCell, `cellContinuation=`
+  block:
+    var result = initTerminalCell(typeof(screen.cells[0]), text, style)
+    result.cellContinuation = continuation
+    result
+
+static:
+  doAssert TerminalCell is TerminalCellAdapter
+  doAssert TerminalLine is TerminalLineAdapter[TerminalCell]
+  doAssert seq[TerminalLine] is TerminalScrollbackAdapter[TerminalLine]
+
 func initTerminalPosition*(row, column: int): TerminalPosition =
   TerminalPosition(row: row, column: column)
 
@@ -160,78 +238,116 @@ func initTerminalModes*(): TerminalModes =
 func initTerminalCursor*(): TerminalCursor =
   TerminalCursor(visible: true, blinking: true, shape: tcsBlock)
 
-func cellIndex(screen: TerminalScreen, row, column: int): int =
+func cellIndex[Cell, Line, Scrollback](
+    screen: TerminalScreen[Cell, Line, Scrollback], row, column: int
+): int =
   ((screen.rowOrigin + row) mod screen.rows) * screen.columns + column
 
-func contains*(screen: TerminalScreen, position: TerminalPosition): bool =
+func contains*[Cell, Line, Scrollback](
+    screen: TerminalScreen[Cell, Line, Scrollback], position: TerminalPosition
+): bool =
   position.row in 0 ..< screen.rows and position.column in 0 ..< screen.columns
 
-func cellAt*(screen: TerminalScreen, row, column: int): lent TerminalCell =
+func cellAt*[Cell, Line, Scrollback](
+    screen: TerminalScreen[Cell, Line, Scrollback], row, column: int
+): lent Cell =
   screen.cells[screen.cellIndex(row, column)]
 
-func lineAt*(screen: TerminalScreen, row: int): TerminalLine =
-  result = newSeq[TerminalCell](screen.columns)
+func lineAt*[Cell, Line, Scrollback](
+    screen: TerminalScreen[Cell, Line, Scrollback], row: int
+): Line =
+  mixin initTerminalLine, `[]=`
+  result = initTerminalLine(Line, screen.columns)
   for column in 0 ..< screen.columns:
     result[column] = screen.cellAt(row, column)
 
-func scrollbackLines*(screen: TerminalScreen): seq[TerminalLine] =
-  result = newSeq[TerminalLine](screen.scrollback.len)
+func scrollbackLines*[Cell, Line, Scrollback](
+    screen: TerminalScreen[Cell, Line, Scrollback]
+): seq[Line] =
+  mixin len, `[]`
+  result = newSeq[Line](screen.scrollback.len)
   for index in 0 ..< screen.scrollback.len:
     result[index] =
       screen.scrollback[(screen.scrollbackFirst + index) mod screen.scrollback.len]
 
-func scrollbackCount*(screen: TerminalScreen): int =
+func scrollbackCount*[Cell, Line, Scrollback](
+    screen: TerminalScreen[Cell, Line, Scrollback]
+): int =
+  mixin len
   screen.scrollback.len
 
-func totalLineCount*(screen: TerminalScreen): int =
+func totalLineCount*[Cell, Line, Scrollback](
+    screen: TerminalScreen[Cell, Line, Scrollback]
+): int =
   ## Return the number of addressable scrollback and live-screen lines.
+  mixin len
   screen.scrollback.len + screen.rows
 
-func lineAtAbsolute*(screen: TerminalScreen, index: int): TerminalLine =
+func lineAtAbsolute*[Cell, Line, Scrollback](
+    screen: TerminalScreen[Cell, Line, Scrollback], index: int
+): Line =
   ## Return a line from the combined scrollback and live-screen history.
   ##
   ## Scrollback occupies the first indexes and the current screen the last
   ## `rows` indexes. An out-of-range index returns an empty line.
+  mixin initTerminalLine, len, `[]`
   if index < 0 or index >= screen.totalLineCount():
-    return
+    return initTerminalLine(Line, 0)
   if index < screen.scrollback.len:
     return screen.scrollback[(screen.scrollbackFirst + index) mod screen.scrollback.len]
   screen.lineAt(index - screen.scrollback.len)
 
-func pendingReplies*(screen: TerminalScreen): seq[string] =
+func pendingReplies*[Cell, Line, Scrollback](
+    screen: TerminalScreen[Cell, Line, Scrollback]
+): seq[string] =
   screen.pendingReplies
 
-proc takePendingReplies*(screen: var TerminalScreen): seq[string] =
+proc takePendingReplies*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback]
+): seq[string] =
   result = move(screen.pendingReplies)
   screen.pendingReplies = @[]
 
-proc markChanged(screen: var TerminalScreen) =
+proc markChanged[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback]
+) =
   inc screen.generation
 
-proc ringBell*(screen: var TerminalScreen) =
+proc ringBell*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback]
+) =
   inc screen.bellCount
   screen.markChanged()
 
-proc takeClipboardRequest*(screen: var TerminalScreen): string =
+proc takeClipboardRequest*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback]
+): string =
   ## Consume text requested by an OSC 52 clipboard-write sequence.
   if not screen.clipboardRequestPending:
     return
   screen.clipboardRequestPending = false
   screen.clipboardText
 
-proc resetTabStops(screen: var TerminalScreen) =
+proc resetTabStops[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback]
+) =
   screen.tabStops = newSeq[bool](screen.columns)
   for column in 0 ..< screen.columns:
     screen.tabStops[column] = column > 0 and column mod 8 == 0
 
-proc initTerminalScreen*(
+proc initTerminalScreen*[
+    Cell: TerminalCellAdapter,
+    Line: TerminalLineAdapter[Cell],
+    Scrollback: TerminalScrollbackAdapter[Line],
+](
+    _: typedesc[TerminalScreen[Cell, Line, Scrollback]],
     columns = DefaultTerminalColumns,
     rows = DefaultTerminalRows,
     maxScrollback = DefaultTerminalScrollback,
-): TerminalScreen =
+): TerminalScreen[Cell, Line, Scrollback] =
   result.columns = max(columns, 1)
   result.rows = max(rows, 1)
-  result.cells = newSeqWith(result.columns * result.rows, initTerminalCell())
+  result.cells = newSeqWith(result.columns * result.rows, result.makeCell())
   result.maxScrollback = max(maxScrollback, 0)
   result.cursor = initTerminalCursor()
   result.style = initTerminalStyle()
@@ -239,22 +355,54 @@ proc initTerminalScreen*(
   result.scrollBottom = result.rows - 1
   result.resetTabStops()
 
-proc setCell(screen: var TerminalScreen, row, column: int, cell: TerminalCell) =
+proc initTerminalScreen*[Cell: TerminalCellAdapter](
+    _: typedesc[Cell],
+    columns = DefaultTerminalColumns,
+    rows = DefaultTerminalRows,
+    maxScrollback = DefaultTerminalScrollback,
+): TerminalScreen[Cell, seq[Cell], seq[seq[Cell]]] =
+  ## Construct a custom-cell screen with sequence-backed lines and scrollback.
+  initTerminalScreen(
+    TerminalScreen[Cell, seq[Cell], seq[seq[Cell]]], columns, rows, maxScrollback
+  )
+
+proc initTerminalScreen*(
+    columns = DefaultTerminalColumns,
+    rows = DefaultTerminalRows,
+    maxScrollback = DefaultTerminalScrollback,
+): TerminalScreen[TerminalCell, TerminalLine, seq[TerminalLine]] =
+  ## Construct the default `TerminalCell`/`TerminalLine` screen.
+  initTerminalScreen(
+    TerminalScreen[TerminalCell, TerminalLine, seq[TerminalLine]],
+    columns,
+    rows,
+    maxScrollback,
+  )
+
+proc setCell[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], row, column: int, cell: Cell
+) =
   if screen.contains(initTerminalPosition(row, column)):
     screen.cells[screen.cellIndex(row, column)] = cell
 
-proc clearWideCell(screen: var TerminalScreen, row, column: int) =
+proc clearWideCell[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], row, column: int
+) =
+  mixin cellContinuation
   if not screen.contains(initTerminalPosition(row, column)):
     return
   let cell = screen.cellAt(row, column)
-  if cell.continuation and column > 0:
-    screen.setCell(row, column - 1, initTerminalCell())
-    screen.setCell(row, column, initTerminalCell())
-  elif column + 1 < screen.columns and screen.cellAt(row, column + 1).continuation:
-    screen.setCell(row, column, initTerminalCell())
-    screen.setCell(row, column + 1, initTerminalCell())
+  if cell.cellContinuation and column > 0:
+    screen.setCell(row, column - 1, screen.makeCell())
+    screen.setCell(row, column, screen.makeCell())
+  elif column + 1 < screen.columns and screen.cellAt(row, column + 1).cellContinuation:
+    screen.setCell(row, column, screen.makeCell())
+    screen.setCell(row, column + 1, screen.makeCell())
 
-proc clearRange(screen: var TerminalScreen, row, firstColumn, lastColumn: int) =
+proc clearRange[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback],
+    row, firstColumn, lastColumn: int,
+) =
   if row notin 0 ..< screen.rows:
     return
   let
@@ -265,29 +413,40 @@ proc clearRange(screen: var TerminalScreen, row, firstColumn, lastColumn: int) =
   screen.clearWideCell(row, first)
   screen.clearWideCell(row, last)
   for column in first .. last:
-    screen.setCell(row, column, initTerminalCell(style = screen.style))
+    screen.setCell(row, column, screen.makeCell(style = screen.style))
 
-proc clearLine(screen: var TerminalScreen, row: int) =
+proc clearLine[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], row: int
+) =
   screen.clearRange(row, 0, screen.columns - 1)
 
-proc clearScrollback*(screen: var TerminalScreen) =
+proc clearScrollback*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback]
+) =
   ## Remove saved history without changing the live terminal screen.
+  mixin len, setLen
   if screen.scrollback.len == 0:
     return
   screen.scrollback.setLen(0)
   screen.scrollbackFirst = 0
   screen.markChanged()
 
-proc appendScrollback(screen: var TerminalScreen, line: sink TerminalLine) =
+proc appendScrollback[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], line: sink Line
+) =
+  mixin len, add, `[]=`
   if screen.maxScrollback == 0:
     return
   if screen.scrollback.len < screen.maxScrollback:
-    screen.scrollback.add line
+    screen.scrollback.add(line)
   else:
     screen.scrollback[screen.scrollbackFirst] = move(line)
     screen.scrollbackFirst = (screen.scrollbackFirst + 1) mod screen.scrollback.len
 
-proc replaceLine(screen: var TerminalScreen, row: int, line: TerminalLine) =
+proc replaceLine[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], row: int, line: Line
+) =
+  mixin len, `[]`
   for column in 0 ..< screen.columns:
     screen.setCell(
       row,
@@ -295,10 +454,12 @@ proc replaceLine(screen: var TerminalScreen, row: int, line: TerminalLine) =
       if column < line.len:
         line[column]
       else:
-        initTerminalCell(),
+        screen.makeCell(),
     )
 
-proc scrollUp*(screen: var TerminalScreen, count = 1) =
+proc scrollUp*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], count = 1
+) =
   let amount = min(max(count, 0), screen.scrollBottom - screen.scrollTop + 1)
   if screen.scrollTop == 0 and screen.scrollBottom == screen.rows - 1:
     for _ in 0 ..< amount:
@@ -319,7 +480,9 @@ proc scrollUp*(screen: var TerminalScreen, count = 1) =
   if amount > 0:
     screen.markChanged()
 
-proc scrollDown*(screen: var TerminalScreen, count = 1) =
+proc scrollDown*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], count = 1
+) =
   let amount = min(max(count, 0), screen.scrollBottom - screen.scrollTop + 1)
   if screen.scrollTop == 0 and screen.scrollBottom == screen.rows - 1:
     for _ in 0 ..< amount:
@@ -335,7 +498,9 @@ proc scrollDown*(screen: var TerminalScreen, count = 1) =
   if amount > 0:
     screen.markChanged()
 
-proc lineFeed*(screen: var TerminalScreen) =
+proc lineFeed*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback]
+) =
   screen.wrapPending = false
   if screen.cursor.position.row == screen.scrollBottom:
     screen.scrollUp()
@@ -343,7 +508,9 @@ proc lineFeed*(screen: var TerminalScreen) =
     inc screen.cursor.position.row
     screen.markChanged()
 
-proc reverseIndex*(screen: var TerminalScreen) =
+proc reverseIndex*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback]
+) =
   screen.wrapPending = false
   if screen.cursor.position.row == screen.scrollTop:
     screen.scrollDown()
@@ -351,22 +518,30 @@ proc reverseIndex*(screen: var TerminalScreen) =
     dec screen.cursor.position.row
     screen.markChanged()
 
-proc carriageReturn*(screen: var TerminalScreen) =
+proc carriageReturn*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback]
+) =
   screen.cursor.position.column = 0
   screen.wrapPending = false
   screen.markChanged()
 
-proc nextLine*(screen: var TerminalScreen) =
+proc nextLine*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback]
+) =
   screen.lineFeed()
   screen.carriageReturn()
 
-proc backspace*(screen: var TerminalScreen) =
+proc backspace*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback]
+) =
   screen.wrapPending = false
   if screen.cursor.position.column > 0:
     dec screen.cursor.position.column
     screen.markChanged()
 
-proc horizontalTab*(screen: var TerminalScreen) =
+proc horizontalTab*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback]
+) =
   screen.wrapPending = false
   for column in screen.cursor.position.column + 1 ..< screen.columns:
     if screen.tabStops[column]:
@@ -376,10 +551,14 @@ proc horizontalTab*(screen: var TerminalScreen) =
   screen.cursor.position.column = screen.columns - 1
   screen.markChanged()
 
-proc setTabStop*(screen: var TerminalScreen) =
+proc setTabStop*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback]
+) =
   screen.tabStops[screen.cursor.position.column] = true
 
-proc clearTabStop*(screen: var TerminalScreen, all = false) =
+proc clearTabStop*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], all = false
+) =
   if all:
     for tabStop in screen.tabStops.mitems:
       tabStop = false
@@ -396,7 +575,9 @@ proc terminalRuneWidth*(rune: Rune): int =
   of uwdtWide, uwdtFull: 2
   else: 1
 
-proc insertCells*(screen: var TerminalScreen, count = 1) =
+proc insertCells*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], count = 1
+) =
   let
     column = screen.cursor.position.column
     amount = min(max(count, 0), screen.columns - column)
@@ -413,7 +594,9 @@ proc insertCells*(screen: var TerminalScreen, count = 1) =
   screen.clearRange(screen.cursor.position.row, column, column + amount - 1)
   screen.markChanged()
 
-proc deleteCells*(screen: var TerminalScreen, count = 1) =
+proc deleteCells*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], count = 1
+) =
   let
     column = screen.cursor.position.column
     amount = min(max(count, 0), screen.columns - column)
@@ -432,12 +615,16 @@ proc deleteCells*(screen: var TerminalScreen, count = 1) =
   )
   screen.markChanged()
 
-proc eraseCells*(screen: var TerminalScreen, count = 1) =
+proc eraseCells*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], count = 1
+) =
   let last = min(screen.cursor.position.column + max(count, 1) - 1, screen.columns - 1)
   screen.clearRange(screen.cursor.position.row, screen.cursor.position.column, last)
   screen.markChanged()
 
-proc insertLines*(screen: var TerminalScreen, count = 1) =
+proc insertLines*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], count = 1
+) =
   let row = screen.cursor.position.row
   if row notin screen.scrollTop .. screen.scrollBottom:
     return
@@ -448,7 +635,9 @@ proc insertLines*(screen: var TerminalScreen, count = 1) =
     screen.clearLine(target)
   screen.markChanged()
 
-proc deleteLines*(screen: var TerminalScreen, count = 1) =
+proc deleteLines*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], count = 1
+) =
   let row = screen.cursor.position.row
   if row notin screen.scrollTop .. screen.scrollBottom:
     return
@@ -459,7 +648,10 @@ proc deleteLines*(screen: var TerminalScreen, count = 1) =
     screen.clearLine(target)
   screen.markChanged()
 
-proc attachCombiningRune(screen: var TerminalScreen, text: string): bool =
+proc attachCombiningRune[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], text: string
+): bool =
+  mixin cellText, `cellText=`, cellContinuation
   var
     row = screen.cursor.position.row
     column = screen.cursor.position.column - 1
@@ -470,16 +662,20 @@ proc attachCombiningRune(screen: var TerminalScreen, text: string): bool =
     column = screen.columns - 1
   if row < 0 or column < 0:
     return false
-  if screen.cellAt(row, column).continuation and column > 0:
+  if screen.cellAt(row, column).cellContinuation and column > 0:
     dec column
   let index = screen.cellIndex(row, column)
-  if screen.cells[index].text.len == 0:
+  if screen.cells[index].cellText.len == 0:
     return false
-  screen.cells[index].text.add text
+  var cell = screen.cells[index]
+  cell.cellText = cell.cellText & text
+  screen.cells[index] = cell
   screen.markChanged()
   true
 
-proc writeText*(screen: var TerminalScreen, text: string) =
+proc writeText*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], text: string
+) =
   let runes = text.toRunes()
   if runes.len == 0:
     return
@@ -503,11 +699,11 @@ proc writeText*(screen: var TerminalScreen, text: string) =
     row = screen.cursor.position.row
     column = screen.cursor.position.column
   screen.clearWideCell(row, column)
-  screen.setCell(row, column, initTerminalCell(text, screen.style))
+  screen.setCell(row, column, screen.makeCell(text, screen.style))
   if width == 2 and column + 1 < screen.columns:
     screen.clearWideCell(row, column + 1)
     screen.setCell(
-      row, column + 1, TerminalCell(style: screen.style, continuation: true)
+      row, column + 1, screen.makeCell(style = screen.style, continuation = true)
     )
   screen.lastPrintedText = text
   if column + width >= screen.columns:
@@ -517,12 +713,16 @@ proc writeText*(screen: var TerminalScreen, text: string) =
     screen.cursor.position.column = column + width
   screen.markChanged()
 
-proc repeatLastText*(screen: var TerminalScreen, count = 1) =
+proc repeatLastText*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], count = 1
+) =
   if screen.lastPrintedText.len > 0:
     for _ in 0 ..< max(count, 1):
       screen.writeText(screen.lastPrintedText)
 
-proc moveCursor*(screen: var TerminalScreen, row, column: int) =
+proc moveCursor*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], row, column: int
+) =
   let rowMin = if screen.modes.origin: screen.scrollTop else: 0
   let rowMax =
     if screen.modes.origin:
@@ -535,7 +735,9 @@ proc moveCursor*(screen: var TerminalScreen, row, column: int) =
   screen.wrapPending = false
   screen.markChanged()
 
-proc moveCursorRelative*(screen: var TerminalScreen, rows, columns: int) =
+proc moveCursorRelative*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], rows, columns: int
+) =
   let
     rowMin = if screen.modes.origin: screen.scrollTop else: 0
     rowMax =
@@ -549,7 +751,9 @@ proc moveCursorRelative*(screen: var TerminalScreen, rows, columns: int) =
   screen.wrapPending = false
   screen.markChanged()
 
-proc eraseInLine*(screen: var TerminalScreen, mode: int) =
+proc eraseInLine*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], mode: int
+) =
   case mode
   of 0:
     screen.clearRange(
@@ -563,7 +767,9 @@ proc eraseInLine*(screen: var TerminalScreen, mode: int) =
     return
   screen.markChanged()
 
-proc eraseInDisplay*(screen: var TerminalScreen, mode: int) =
+proc eraseInDisplay*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], mode: int
+) =
   case mode
   of 0:
     screen.eraseInLine(0)
@@ -583,7 +789,9 @@ proc eraseInDisplay*(screen: var TerminalScreen, mode: int) =
     return
   screen.markChanged()
 
-proc setScrollRegion*(screen: var TerminalScreen, top, bottom: int) =
+proc setScrollRegion*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], top, bottom: int
+) =
   if top >= 0 and top < bottom and bottom < screen.rows:
     screen.scrollTop = top
     screen.scrollBottom = bottom
@@ -592,7 +800,9 @@ proc setScrollRegion*(screen: var TerminalScreen, top, bottom: int) =
     screen.scrollBottom = screen.rows - 1
   screen.moveCursor(0, 0)
 
-proc saveCursor*(screen: var TerminalScreen) =
+proc saveCursor*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback]
+) =
   screen.saved = TerminalSavedState(
     cursor: screen.cursor,
     style: screen.style,
@@ -600,7 +810,9 @@ proc saveCursor*(screen: var TerminalScreen) =
     wrapPending: screen.wrapPending,
   )
 
-proc restoreCursor*(screen: var TerminalScreen) =
+proc restoreCursor*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback]
+) =
   screen.cursor = screen.saved.cursor
   screen.style = screen.saved.style
   screen.modes = screen.saved.modes
@@ -610,7 +822,9 @@ proc restoreCursor*(screen: var TerminalScreen) =
     clamp(screen.cursor.position.column, 0, screen.columns - 1)
   screen.markChanged()
 
-proc useAlternateScreen*(screen: var TerminalScreen, enabled, saveRestore: bool) =
+proc useAlternateScreen*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], enabled, saveRestore: bool
+) =
   if enabled == screen.alternateScreen:
     return
   if enabled:
@@ -620,7 +834,7 @@ proc useAlternateScreen*(screen: var TerminalScreen, enabled, saveRestore: bool)
     screen.primaryRowOrigin = screen.rowOrigin
     screen.primaryCursor = screen.cursor
     screen.primarySaved = screen.saved
-    screen.cells = newSeqWith(screen.columns * screen.rows, initTerminalCell())
+    screen.cells = newSeqWith(screen.columns * screen.rows, screen.makeCell())
     screen.rowOrigin = 0
     screen.cursor.position = initTerminalPosition(0, 0)
     screen.wrapPending = false
@@ -639,48 +853,64 @@ proc useAlternateScreen*(screen: var TerminalScreen, enabled, saveRestore: bool)
   screen.scrollBottom = screen.rows - 1
   screen.markChanged()
 
-proc queueReply*(screen: var TerminalScreen, reply: sink string) =
+proc queueReply*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], reply: sink string
+) =
   screen.pendingReplies.add reply
 
-proc reset*(screen: var TerminalScreen) =
+proc reset*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback]
+) =
   let
     columns = screen.columns
     rows = screen.rows
     maxScrollback = screen.maxScrollback
     generation = screen.generation
-  screen = initTerminalScreen(columns, rows, maxScrollback)
+  screen = initTerminalScreen(
+    TerminalScreen[Cell, Line, Scrollback], columns, rows, maxScrollback
+  )
   screen.generation = generation + 1
 
-proc resizeLine(line: TerminalLine, columns: int): TerminalLine =
-  result = newSeqWith(columns, initTerminalCell())
+proc resizeLine[Cell, Line, Scrollback](
+    screen: TerminalScreen[Cell, Line, Scrollback], line: Line, columns: int
+): Line =
+  mixin initTerminalLine, len, `[]`, `[]=`, cellContinuation
+  result = initTerminalLine(Line, columns)
+  for column in 0 ..< columns:
+    result[column] = screen.makeCell()
   for column in 0 ..< min(columns, line.len):
     result[column] = line[column]
-  if columns > 0 and columns < line.len and line[columns].continuation:
-    result[columns - 1] = initTerminalCell()
+  if columns > 0 and columns < line.len and line[columns].cellContinuation:
+    result[columns - 1] = screen.makeCell()
 
-proc resizeCells(
-    cells: seq[TerminalCell], rowOrigin, oldColumns, oldRows, columns, rows: int
-): seq[TerminalCell] =
-  result = newSeqWith(columns * rows, initTerminalCell())
+proc resizeCells[Cell, Line, Scrollback](
+    screen: TerminalScreen[Cell, Line, Scrollback],
+    cells: seq[Cell],
+    rowOrigin, oldColumns, oldRows, columns, rows: int,
+): seq[Cell] =
+  mixin initTerminalLine, `[]`, `[]=`
+  result = newSeqWith(columns * rows, screen.makeCell())
   for row in 0 ..< min(oldRows, rows):
-    var oldLine = newSeq[TerminalCell](oldColumns)
+    var oldLine = initTerminalLine(Line, oldColumns)
     for column in 0 ..< oldColumns:
       oldLine[column] = cells[((rowOrigin + row) mod oldRows) * oldColumns + column]
-    let line = oldLine.resizeLine(columns)
+    let line = screen.resizeLine(oldLine, columns)
     for column in 0 ..< columns:
       result[row * columns + column] = line[column]
 
-proc resize*(screen: var TerminalScreen, columns, rows: int) =
+proc resize*[Cell, Line, Scrollback](
+    screen: var TerminalScreen[Cell, Line, Scrollback], columns, rows: int
+) =
   let
     nextColumns = max(columns, 1)
     nextRows = max(rows, 1)
   if nextColumns == screen.columns and nextRows == screen.rows:
     return
-  screen.cells = resizeCells(
+  screen.cells = screen.resizeCells(
     screen.cells, screen.rowOrigin, screen.columns, screen.rows, nextColumns, nextRows
   )
   if screen.primaryCells.len > 0:
-    screen.primaryCells = resizeCells(
+    screen.primaryCells = screen.resizeCells(
       screen.primaryCells, screen.primaryRowOrigin, screen.columns, screen.rows,
       nextColumns, nextRows,
     )
@@ -697,16 +927,21 @@ proc resize*(screen: var TerminalScreen, columns, rows: int) =
   screen.wrapPending = false
   screen.markChanged()
 
-func lineText(line: TerminalLine): string =
-  for cell in line:
-    if not cell.continuation:
-      if cell.text.len > 0:
-        result.add cell.text
+func lineText[Line](line: Line): string =
+  mixin len, `[]`, cellText, cellContinuation
+  for index in 0 ..< line.len:
+    let cell = line[index]
+    if not cell.cellContinuation:
+      if cell.cellText.len > 0:
+        result.add cell.cellText
       else:
         result.add ' '
   result = result.strip(leading = false, trailing = true, chars = {' '})
 
-func plainText*(screen: TerminalScreen, includeScrollback = true): string =
+func plainText*[Cell, Line, Scrollback](
+    screen: TerminalScreen[Cell, Line, Scrollback], includeScrollback = true
+): string =
+  mixin len
   var lines: seq[string]
   if includeScrollback and not screen.alternateScreen:
     for index in 0 ..< screen.scrollback.len:
@@ -720,6 +955,6 @@ func plainText*(screen: TerminalScreen, includeScrollback = true): string =
   if lastContentRow < 0:
     if screen.scrollback.len == 0 or not includeScrollback:
       return ""
-    lastContentRow = screen.scrollback.high
+    lastContentRow = screen.scrollback.len - 1
   lines.setLen(lastContentRow + 1)
   lines.join("\n")
