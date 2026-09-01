@@ -1,4 +1,4 @@
-import std/[monotimes, os, strutils, tempfiles, times, unittest]
+import std/[monotimes, os, sequtils, strutils, tempfiles, times, unittest]
 import terminex
 
 proc feed(screen: var TerminalScreen, parser: var TerminalParser, value: string) =
@@ -159,7 +159,7 @@ suite "terminex terminal screen and parser":
 
     screen.feed(parser, "zero\r\none\r\ntwo\r\nthree\r\nfour\r\nfive")
 
-    let scrollback = screen.scrollbackLines()
+    let scrollback = toSeq(scrollbackLines(screen))
     check screen.scrollbackCount == 3
     check scrollback[0][0].text == "o"
     check scrollback[1][0].text == "t"

@@ -4,6 +4,8 @@ import std/[sequtils, strutils, unicode]
 
 import pkg/unicodedb/[properties, widths]
 
+import ./ringbuffer
+
 const
   DefaultTerminalColumns* = 80
   DefaultTerminalRows* = 24
@@ -117,25 +119,13 @@ type
         line[0] is Cell
         writable[0] = line[0]
 
-  ## A mutable, seq-compatible scrollback implementation. It must support
-  ## `len`, indexing, `add`, and `setLen` for its line type.
-  TerminalScrollbackAdapter*[Line] =
-    concept scrollback
-        mixin len, `[]`, `[]=`, add, setLen
-        var writable: typeof(scrollback)
-        scrollback.len is int
-        scrollback[0] is Line
-        writable[0] = scrollback[0]
-        writable.add scrollback[0]
-        writable.setLen(0)
+  TerminalScrollbackAdapter*[Line] = RingBufferStorageAdapter[Line]
 
   TerminalScreen*[Cell = TerminalCell, Line = seq[Cell], Scrollback = seq[Line]] = object
     columns*, rows*: int
     cells: seq[Cell]
-    scrollback: Scrollback
-    scrollbackFirst: int
+    scrollback: RingBuffer[Line, Scrollback]
     rowOrigin: int
-    maxScrollback*: int
     cursor*: TerminalCursor
     style*: TerminalStyle
     modes*: TerminalModes
@@ -261,26 +251,26 @@ func lineAt*[Cell, Line, Scrollback](
   for column in 0 ..< screen.columns:
     result[column] = screen.cellAt(row, column)
 
-func scrollbackLines*[Cell, Line, Scrollback](
+iterator scrollbackLines*[Cell, Line, Scrollback](
     screen: TerminalScreen[Cell, Line, Scrollback]
-): seq[Line] =
-  mixin len, `[]`
-  result = newSeq[Line](screen.scrollback.len)
+): Line =
   for index in 0 ..< screen.scrollback.len:
-    result[index] =
-      screen.scrollback[(screen.scrollbackFirst + index) mod screen.scrollback.len]
+    yield screen.scrollback[index]
 
 func scrollbackCount*[Cell, Line, Scrollback](
     screen: TerminalScreen[Cell, Line, Scrollback]
 ): int =
-  mixin len
   screen.scrollback.len
+
+func maxScrollback*[Cell, Line, Scrollback](
+    screen: TerminalScreen[Cell, Line, Scrollback]
+): int =
+  screen.scrollback.cap
 
 func totalLineCount*[Cell, Line, Scrollback](
     screen: TerminalScreen[Cell, Line, Scrollback]
 ): int =
   ## Return the number of addressable scrollback and live-screen lines.
-  mixin len
   screen.scrollback.len + screen.rows
 
 func lineAtAbsolute*[Cell, Line, Scrollback](
@@ -290,11 +280,11 @@ func lineAtAbsolute*[Cell, Line, Scrollback](
   ##
   ## Scrollback occupies the first indexes and the current screen the last
   ## `rows` indexes. An out-of-range index returns an empty line.
-  mixin initTerminalLine, len, `[]`
+  mixin initTerminalLine
   if index < 0 or index >= screen.totalLineCount():
     return initTerminalLine(Line, 0)
   if index < screen.scrollback.len:
-    return screen.scrollback[(screen.scrollbackFirst + index) mod screen.scrollback.len]
+    return screen.scrollback[index]
   screen.lineAt(index - screen.scrollback.len)
 
 func pendingReplies*[Cell, Line, Scrollback](
@@ -348,7 +338,7 @@ proc initTerminalScreen*[
   result.columns = max(columns, 1)
   result.rows = max(rows, 1)
   result.cells = newSeqWith(result.columns * result.rows, result.makeCell())
-  result.maxScrollback = max(maxScrollback, 0)
+  result.scrollback = initRingBuffer(RingBuffer[Line, Scrollback], maxScrollback)
   result.cursor = initTerminalCursor()
   result.style = initTerminalStyle()
   result.modes = initTerminalModes()
@@ -424,24 +414,15 @@ proc clearScrollback*[Cell, Line, Scrollback](
     screen: var TerminalScreen[Cell, Line, Scrollback]
 ) =
   ## Remove saved history without changing the live terminal screen.
-  mixin len, setLen
   if screen.scrollback.len == 0:
     return
-  screen.scrollback.setLen(0)
-  screen.scrollbackFirst = 0
+  screen.scrollback.clear()
   screen.markChanged()
 
 proc appendScrollback[Cell, Line, Scrollback](
     screen: var TerminalScreen[Cell, Line, Scrollback], line: sink Line
 ) =
-  mixin len, add, `[]=`
-  if screen.maxScrollback == 0:
-    return
-  if screen.scrollback.len < screen.maxScrollback:
-    screen.scrollback.add(line)
-  else:
-    screen.scrollback[screen.scrollbackFirst] = move(line)
-    screen.scrollbackFirst = (screen.scrollbackFirst + 1) mod screen.scrollback.len
+  screen.scrollback.add(line)
 
 proc replaceLine[Cell, Line, Scrollback](
     screen: var TerminalScreen[Cell, Line, Scrollback], row: int, line: Line
@@ -941,7 +922,6 @@ func lineText[Line](line: Line): string =
 func plainText*[Cell, Line, Scrollback](
     screen: TerminalScreen[Cell, Line, Scrollback], includeScrollback = true
 ): string =
-  mixin len
   var lines: seq[string]
   if includeScrollback and not screen.alternateScreen:
     for index in 0 ..< screen.scrollback.len:
