@@ -9,33 +9,28 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      NIM_VERSION: 2.2.10
     steps:
       - uses: actions/checkout@v4
-
-      - uses: jiro4989/setup-nim-action@v2
-        with:
-          nim-version: '2.2.10'
 
       - name: Cache Atlas deps
         uses: actions/cache@v4
         with:
           path: deps
-          key: ${{ runner.os }}-atlas-${{ hashFiles('*.nimble') }}
-          restore-keys: |
-            ${{ runner.os }}-atlas-
-
-      - name: Add Atlas to PATH
-        run: echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
+          key: ${{ runner.os }}-nim-${{ env.NIM_VERSION }}-atlas-${{ hashFiles('terminex.nimble') }}
 
       - name: Install Atlas
         shell: bash
-        run: curl -fsSL https://raw.githubusercontent.com/nim-lang/atlas/HEAD/install.sh | bash -
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/nim-lang/atlas/HEAD/install.sh | bash -
+          echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
 
-      - name: Check Atlas version
-        run: atlas -v
+      - name: Install Nim
+        run: atlas env "$NIM_VERSION" --binary --github-path
 
       - name: Install dependencies
         run: atlas install
 
       - name: Run tests
-        run: nim test
+        run: atlas-run tests
