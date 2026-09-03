@@ -63,11 +63,7 @@ type
       xMasterFd: cint
       xChildPid: Pid
 
-  TerminexSession*[
-    Cell = TerminexCell,
-    Line = seq[Cell],
-    Scrollback = RingBuffer[Line],
-  ] = ref TerminexSessionObj[
+  TerminexSession*[Cell = TerminexCell, Line = seq[Cell], Scrollback = RingBuffer[Line]] = ref TerminexSessionObj[
     Cell, Line, Scrollback
   ]
 
@@ -84,6 +80,8 @@ when defined(posix):
     ): Pid {.importc, header: "<libutil.h>".}
 
   else:
+    when defined(linux):
+      {.passL: "-lutil".}
     proc forkpty(
       master: var cint, name: cstring, termios: pointer, size: pointer
     ): Pid {.importc, header: "<pty.h>".}
