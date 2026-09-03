@@ -32,6 +32,31 @@ The input helpers turn frontend key, mouse, paste, and focus events into termina
 bytes. `TerminexSpawnOptions.terminalProgram` defaults to `"Terminex"`; set it
 to an empty string to omit `TERM_PROGRAM`.
 
+## Compact scrollback
+
+For large histories, use the optional compact in-memory backend. It stores
+completed lines in encoded segments, interns repeated styles, omits trailing
+default cells, and compresses blank and ASCII runs. Requested lines are decoded
+back into the normal `TerminexLine` representation, so rendering APIs remain
+unchanged.
+
+```nim
+import terminex
+
+let session = newCompactTerminalSession(
+  columns = 80,
+  rows = 24,
+  maxScrollback = 1_000_000,
+)
+```
+
+`CompactScrollback[Cell, Line]` can also be used as the scrollback parameter of
+a fully specialized `TerminexScreen`. It provides indexed lookup, so
+`lineAtAbsolute` does not scan or decode preceding lines. The default
+constructors continue to use `RingBuffer`. Rendering individual lines keeps the
+decoded working set bounded; `plainText(includeScrollback = true)` still builds
+one string containing the complete history.
+
 ## Custom screen storage
 
 `TerminexScreen` and `TerminexSession` can use application-owned cell, line,
@@ -42,7 +67,8 @@ and scrollback types. The default remains `TerminexCell`, `TerminexLine`, and
   `cellStyle`, `cellStyle=`; and `cellContinuation`, `cellContinuation=`.
 - `initTerminalLine(LineType, length)`, `len`, `[]`, and `[]=` for lines.
 - `initScrollback(ScrollbackType, capacity)`, `len`, `items`, `add`, and
-  `clear` for scrollback.
+  `clear` for scrollback. An optional `[]` operation enables direct indexed
+  lookup.
 
 The exported `TerminexCellAdapter`, `TerminexLineAdapter[Cell]`, and
 `TerminexScrollbackAdapter[Line]` concepts enforce this complete contract at

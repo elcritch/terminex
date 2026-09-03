@@ -122,7 +122,9 @@ type
   ## A bounded scrollback container accepted by `TerminexScreen`.
   ##
   ## `initScrollback` receives the maximum retained line count. The container's
-  ## `add` implementation is responsible for enforcing that capacity.
+  ## `add` implementation is responsible for enforcing that capacity. A
+  ## container may additionally implement `[]` to make `lineAtAbsolute`
+  ## indexed rather than iterator-based.
   TerminexScrollbackAdapter*[Line] =
     concept scrollback
         mixin initScrollback, len, items, add, clear
@@ -299,16 +301,19 @@ func lineAtAbsolute*[Cell, Line, Scrollback](
   ##
   ## Scrollback occupies the first indexes and the current screen the last
   ## `rows` indexes. An out-of-range index returns an empty line.
-  mixin initTerminalLine, len, items
+  mixin `[]`, initTerminalLine, len, items
   if index < 0 or index >= screen.totalLineCount():
     return initTerminalLine(Line, 0)
   if index < screen.scrollback.len:
-    var currentIndex = 0
-    for storedLine in screen.scrollback:
-      if currentIndex == index:
-        return storedLine
-      inc currentIndex
-    return initTerminalLine(Line, 0)
+    when compiles(screen.scrollback[index]):
+      return screen.scrollback[index]
+    else:
+      var currentIndex = 0
+      for storedLine in screen.scrollback:
+        if currentIndex == index:
+          return storedLine
+        inc currentIndex
+      return initTerminalLine(Line, 0)
   screen.lineAt(index - screen.scrollback.len)
 
 func pendingReplies*[Cell, Line, Scrollback](
