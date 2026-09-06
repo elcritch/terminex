@@ -586,7 +586,9 @@ suite "terminex terminal sessions":
       )
 
       check session.running()
+      let closeStarted = getMonoTime()
       session.close()
+      check getMonoTime() - closeStarted < initDuration(seconds = 1)
       check session.state == tssClosed
       check not session.running()
       session.close()

@@ -3,7 +3,7 @@
 import std/os
 
 when defined(posix):
-  import std/[posix, tables]
+  import std/[monotimes, posix, tables, times]
 
 import ./[ringbuffer, termparser, termscreen]
 
@@ -11,6 +11,8 @@ const
   DefaultTerminalReadLimit* = 1024 * 1024
   DefaultTerminalWriteLimit* = 1024 * 1024
   TerminalReadChunkSize = 16 * 1024
+  TerminalCloseWaitMilliseconds = 250
+  TerminalClosePollMilliseconds = 5
 
 type
   TerminexEnvironmentVariable* = object
@@ -101,18 +103,40 @@ when defined(posix):
     descriptor: cint, request: culong
   ): cint {.importc: "ioctl", header: "<sys/ioctl.h>", varargs.}
 
+  proc reapTerminalProcess(child: Pid): bool =
+    var status: cint
+    let reaped = waitpid(child, status, WNOHANG)
+    if reaped == child:
+      return true
+    if reaped < 0 and errno != EINTR:
+      return true
+
+  proc stopTerminalProcess(child: Pid): bool =
+    ## Stop a session-owned process group without allowing terminal teardown to
+    ## block indefinitely on a child that the operating system cannot reap yet.
+    if child <= 0 or reapTerminalProcess(child):
+      return true
+
+    discard killpg(child, SIGHUP)
+    discard killpg(child, SIGKILL)
+    discard kill(child, SIGKILL)
+
+    let deadline = getMonoTime() + initDuration(milliseconds = TerminalCloseWaitMilliseconds)
+    while getMonoTime() < deadline:
+      if reapTerminalProcess(child):
+        return true
+      sleep(TerminalClosePollMilliseconds)
+
+    reapTerminalProcess(child)
+
 template releaseTerminalProcess[Cell, Line, Scrollback](
     session: TerminexSessionObj[Cell, Line, Scrollback]
 ) =
   when defined(posix):
     if session.xMasterFd >= 0:
       discard posix.close(session.xMasterFd)
-    if session.xChildPid > 0 and session.xState == tssRunning:
-      discard killpg(session.xChildPid, SIGHUP)
-      discard killpg(session.xChildPid, SIGKILL)
-      discard kill(session.xChildPid, SIGKILL)
-      var status: cint
-      discard waitpid(session.xChildPid, status, 0)
+    if session.xChildPid > 0:
+      discard stopTerminalProcess(session.xChildPid)
 
 proc `=destroy`[Cell, Line, Scrollback](
     session: TerminexSessionObj[Cell, Line, Scrollback]
@@ -378,10 +402,7 @@ proc start*[Cell, Line, Scrollback](
       descriptor.setNonBlocking()
     except TerminexSessionError as error:
       discard posix.close(descriptor)
-      discard killpg(child, SIGKILL)
-      discard kill(child, SIGKILL)
-      var status: cint
-      discard waitpid(child, status, 0)
+      discard stopTerminalProcess(child)
       session.xState = tssFailed
       session.xError = error.msg
       raise
@@ -585,19 +606,18 @@ proc terminate*[Cell, Line, Scrollback](
     false
 
 proc close*[Cell, Line, Scrollback](session: TerminexSession[Cell, Line, Scrollback]) =
-  if session.isNil or session.xState == tssClosed:
+  if session.isNil:
     return
   when defined(posix):
+    if session.xState == tssClosed:
+      if session.xChildPid > 0 and stopTerminalProcess(session.xChildPid):
+        session.xChildPid = 0
+      return
     if session.xMasterFd >= 0:
       discard posix.close(session.xMasterFd)
       session.xMasterFd = -1
     if session.xChildPid > 0:
-      if session.xState == tssRunning:
-        discard killpg(session.xChildPid, SIGHUP)
-        discard killpg(session.xChildPid, SIGKILL)
-        discard kill(session.xChildPid, SIGKILL)
-      var status: cint
-      discard waitpid(session.xChildPid, status, 0)
-      session.xChildPid = 0
+      if stopTerminalProcess(session.xChildPid):
+        session.xChildPid = 0
   session.xPendingWrite.setLen(0)
   session.xState = tssClosed
