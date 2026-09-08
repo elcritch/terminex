@@ -108,7 +108,7 @@ when defined(posix):
     let reaped = waitpid(child, status, WNOHANG)
     if reaped == child:
       return true
-    if reaped < 0 and errno != EINTR:
+    if reaped < 0 and errno == ECHILD:
       return true
 
   proc stopTerminalProcess(child: Pid): bool =
@@ -121,7 +121,8 @@ when defined(posix):
     discard killpg(child, SIGKILL)
     discard kill(child, SIGKILL)
 
-    let deadline = getMonoTime() + initDuration(milliseconds = TerminalCloseWaitMilliseconds)
+    let deadline =
+      getMonoTime() + initDuration(milliseconds = TerminalCloseWaitMilliseconds)
     while getMonoTime() < deadline:
       if reapTerminalProcess(child):
         return true
@@ -369,6 +370,12 @@ proc start*[Cell, Line, Scrollback](
   if session.xState == tssRunning:
     raise newException(TerminexSessionError, "terminal session is already running")
   when defined(posix):
+    if session.xChildPid > 0:
+      if not stopTerminalProcess(session.xChildPid):
+        raise newException(
+          TerminexSessionError, "previous terminal process is still exiting"
+        )
+      session.xChildPid = 0
     # The child of a threaded process may only call async-signal-safe operations
     # before exec, so allocate its argument and environment blocks in the parent.
     let
@@ -398,16 +405,17 @@ proc start*[Cell, Line, Scrollback](
     if child == 0:
       executeChild(shell.cstring, workingDirectory, arguments, environment)
 
+    session.xChildPid = child
     try:
       descriptor.setNonBlocking()
     except TerminexSessionError as error:
       discard posix.close(descriptor)
-      discard stopTerminalProcess(child)
+      if stopTerminalProcess(child):
+        session.xChildPid = 0
       session.xState = tssFailed
       session.xError = error.msg
       raise
     session.xMasterFd = descriptor
-    session.xChildPid = child
     session.xState = tssRunning
     session.xExitCode = -1
     session.xError.setLen(0)

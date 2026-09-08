@@ -1,6 +1,9 @@
 import std/[monotimes, os, sequtils, strutils, tempfiles, times, unittest]
 import terminex
 
+when defined(posix):
+  import std/posix
+
 proc feed(screen: var TerminexScreen, parser: var TerminexParser, value: string) =
   parser.feed(screen, value)
 
@@ -582,15 +585,27 @@ suite "terminex terminal sessions":
 
     test "closing a live PTY reaps its owned child":
       let session = spawnTerminalSession(
-        initTerminalSpawnOptions(command = "sleep 30"), columns = 10, rows = 3
+        initTerminalSpawnOptions(
+          shell = "/bin/sh", command = "printf 'READY %s\\n' \"$$\"; exec sleep 30"
+        ),
+        columns = 80,
+        rows = 3,
       )
+      defer:
+        session.close()
 
       check session.running()
+      require session.pollUntilText("READY ")
+      let child =
+        Pid(parseInt(session.screen().plainText().strip().splitWhitespace()[1]))
       let closeStarted = getMonoTime()
       session.close()
       check getMonoTime() - closeStarted < initDuration(seconds = 1)
       check session.state == tssClosed
       check not session.running()
+      var status: cint
+      check waitpid(child, status, WNOHANG) == -1
+      check errno == ECHILD
       session.close()
   else:
     test "unsupported platforms report a catchable spawn error":
