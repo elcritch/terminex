@@ -32,6 +32,15 @@ The input helpers turn frontend key, mouse, paste, and focus events into termina
 bytes. `TerminexSpawnOptions.terminalProgram` defaults to `"Terminex"`; set it
 to an empty string to omit `TERM_PROGRAM`.
 
+On POSIX, `close()` closes the PTY and signals the child process group, then
+polls for child exit for up to 250 ms per session. Destruction uses the same
+bounded wait. If the OS has not made the child reapable by that deadline,
+`close()` retains its PID so a later `close()` can retry; restarting the session
+raises `TerminexSessionError` while that child is still pending. There is no
+background reaper: after session destruction, an unusually delayed child may
+remain a zombie until the host process exits. This keeps a stuck child from
+blocking GUI shutdown indefinitely.
+
 ## Compact scrollback
 
 For large histories, use the optional compact in-memory backend. It stores
