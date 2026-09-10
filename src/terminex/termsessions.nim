@@ -43,6 +43,7 @@ type
     ## Cheap session-owned screen metadata for rendering and input decisions.
     columns*, rows*: int
     scrollbackCount*, totalLineCount*: int
+    scrollbackLinesAdded*, scrollbackResetCount*: uint64
     generation*: uint64
     alternateScreen*: bool
     cursor*: TerminexCursor
@@ -243,6 +244,8 @@ func screenInfo*[Cell, Line, Scrollback](
     columns: session.xScreen.columns,
     rows: session.xScreen.rows,
     scrollbackCount: session.xScreen.scrollbackCount(),
+    scrollbackLinesAdded: session.xScreen.scrollbackLinesAdded,
+    scrollbackResetCount: session.xScreen.scrollbackResetCount,
     totalLineCount: session.xScreen.totalLineCount(),
     generation: session.xScreen.generation,
     alternateScreen: session.xScreen.alternateScreen,
