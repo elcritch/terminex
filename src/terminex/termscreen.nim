@@ -143,6 +143,8 @@ type
     scrollback: Scrollback
     rowOrigin: int
     maxScrollback*: int
+    scrollbackLinesAdded*: uint64 ## History append count, including evicted lines.
+    scrollbackResetCount*: uint64 ## Changes when saved history is explicitly cleared.
     cursor*: TerminexCursor
     style*: TerminexStyle
     modes*: TerminexModes
@@ -449,6 +451,7 @@ proc clearScrollback*[Cell, Line, Scrollback](
   if screen.scrollback.len == 0:
     return
   screen.scrollback.clear()
+  inc screen.scrollbackResetCount
   screen.markChanged()
 
 proc appendScrollback[Cell, Line, Scrollback](
@@ -456,6 +459,7 @@ proc appendScrollback[Cell, Line, Scrollback](
 ) =
   mixin add
   screen.scrollback.add(line)
+  inc screen.scrollbackLinesAdded
 
 proc replaceLine[Cell, Line, Scrollback](
     screen: var TerminexScreen[Cell, Line, Scrollback], row: int, line: Line
@@ -880,10 +884,14 @@ proc reset*[Cell, Line, Scrollback](
     rows = screen.rows
     maxScrollback = screen.maxScrollback
     generation = screen.generation
+    linesAdded = screen.scrollbackLinesAdded
+    resets = screen.scrollbackResetCount
   screen = initTerminalScreen(
     TerminexScreen[Cell, Line, Scrollback], columns, rows, maxScrollback
   )
   screen.generation = generation + 1
+  screen.scrollbackLinesAdded = linesAdded
+  screen.scrollbackResetCount = resets + 1
 
 proc resizeLine[Cell, Line, Scrollback](
     screen: TerminexScreen[Cell, Line, Scrollback], line: Line, columns: int

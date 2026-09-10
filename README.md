@@ -116,3 +116,8 @@ var
 parser.feed(screen, "\x1b[31mhello")
 echo screen.plainText()
 ```
+
+Session `screenInfo()` includes `scrollbackLinesAdded` and `scrollbackResetCount`.
+The append count continues increasing when bounded history evicts old lines;
+the reset count changes on explicit history clearing or a full terminal reset.
+Views can use these counters to keep a scrollback viewport anchored to its content.

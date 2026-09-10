@@ -128,3 +128,20 @@ suite "terminex compact scrollback":
     check screen.lineAtAbsolute(0)[0].glyph == "o"
     check screen.lineAtAbsolute(0)[1].glyph == "n"
     check screen.lineAtAbsolute(0)[2].glyph == "e"
+
+suite "Compact history progress":
+  test "session reports appends even when retained history is full":
+    let session = newCompactTerminalSession(columns = 8, rows = 2, maxScrollback = 2)
+    session.processOutput("a\r\nb\r\nc\r\nd")
+    check session.screenInfo().scrollbackCount == 2
+    check session.screenInfo().scrollbackLinesAdded == 2
+    session.processOutput("\r\ne")
+    check session.screenInfo().scrollbackCount == 2
+    check session.screenInfo().scrollbackLinesAdded == 3
+    session.clearScrollback()
+    check session.screenInfo().scrollbackCount == 0
+    check session.screenInfo().scrollbackResetCount == 1
+    check session.screenInfo().scrollbackLinesAdded == 3
+    session.processOutput("\ec")
+    check session.screenInfo().scrollbackResetCount == 2
+    check session.screenInfo().scrollbackLinesAdded == 3
