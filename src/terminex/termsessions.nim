@@ -1,9 +1,9 @@
 ## Pseudo-terminal process transport and terminal parser integration.
 
-import std/os
+import std/[os, times]
 
 when defined(posix):
-  import std/[monotimes, posix, tables, times]
+  import std/[monotimes, posix, tables]
 
 import ./[ringbuffer, termparser, termscreen]
 
@@ -38,6 +38,10 @@ type
     bytesRead*: int
     screenChanged*: bool
     processExited*: bool
+    readPaused*: bool
+      ## A byte or time budget was reached; call poll again to finish draining.
+    outputClosed*: bool
+      ## The PTY reached EOF/hangup, rather than merely having no data available.
 
   TerminexScreenInfo* = object
     ## Cheap session-owned screen metadata for rendering and input decisions.
@@ -547,17 +551,30 @@ when defined(posix):
       false
 
 proc poll*[Cell, Line, Scrollback](
-    session: TerminexSession[Cell, Line, Scrollback]
+    session: TerminexSession[Cell, Line, Scrollback], timeBudget = initDuration()
 ): TerminexPollResult =
+  ## Drain available output up to `readLimit`, optionally yielding between read
+  ## chunks after `timeBudget`. A nonpositive duration disables the time budget.
+  ## Always allow one chunk to make progress. Collect exit only after draining,
+  ## so a child that exits during a budgeted read cannot lose its final output.
   if not session.running():
     result.processExited = session.xState == tssExited
     return
   let generation = session.xScreen.generation
   try:
-    discard session.flushInput()
     when defined(posix):
+      let
+        timed = timeBudget.inNanoseconds > 0
+        deadline =
+          if timed:
+            getMonoTime() + timeBudget
+          else:
+            default(MonoTime)
       var consumed = 0
       while consumed < session.xReadLimit:
+        if consumed > 0 and timed and getMonoTime() >= deadline:
+          result.readPaused = true
+          break
         var buffer =
           newString(min(TerminalReadChunkSize, session.xReadLimit - consumed))
         let count = posix.read(session.xMasterFd, addr buffer[0], buffer.len)
@@ -567,15 +584,23 @@ proc poll*[Cell, Line, Scrollback](
           session.processOutput(buffer)
         elif count < 0 and errno == EINTR:
           discard
-        elif count < 0 and (errno == EAGAIN or errno == EWOULDBLOCK or errno == EIO):
+        elif count < 0 and (errno == EAGAIN or errno == EWOULDBLOCK):
           break
         else:
+          result.outputClosed = count == 0 or (count < 0 and errno == EIO)
           break
       result.bytesRead = consumed
+      result.readPaused = result.readPaused or consumed >= session.xReadLimit
+      if not result.readPaused:
+        result.processExited = session.checkExit()
       let replies = session.xScreen.takePendingReplies()
-      for reply in replies:
-        session.write(reply)
-      result.processExited = session.checkExit()
+      if result.outputClosed or result.processExited:
+        # A failed write must not prevent draining output or collecting exit.
+        session.xPendingWrite.setLen(0)
+      else:
+        discard session.flushInput()
+        for reply in replies:
+          session.write(reply)
   except TerminexSessionError as error:
     session.xError = error.msg
   result.screenChanged = generation != session.xScreen.generation

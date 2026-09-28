@@ -32,6 +32,16 @@ The input helpers turn frontend key, mouse, paste, and focus events into termina
 bytes. `TerminexSpawnOptions.terminalProgram` defaults to `"Terminex"`; set it
 to an empty string to omit `TERM_PROGRAM`.
 
+GUI event loops can call `session.poll(timeBudget = initDuration(milliseconds = 2))`
+to yield between read chunks. Import `std/times` for `initDuration`. The budget
+is checked between chunks, so a single chunk can exceed it. `readPaused` means
+the caller should schedule another drain; it does not guarantee more bytes are
+available. `outputClosed` distinguishes EOF/hangup from an empty nonblocking
+read. Exit is collected only after draining, preserving the child's final bytes.
+Pending input is discarded after hangup or exit, so a failed write cannot block
+exit collection.
+The default zero time budget retains byte-limited synchronous polling.
+
 On POSIX, `close()` closes the PTY and signals the child process group, then
 polls for child exit for up to 250 ms per session. Destruction uses the same
 bounded wait. If the OS has not made the child reapable by that deadline,
