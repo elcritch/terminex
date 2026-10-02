@@ -494,6 +494,86 @@ suite "terminex terminal sessions":
       session.write("input")
 
   when defined(posix):
+    test "time-budgeted polls preserve final output across child exit":
+      let root = createTempDir("terminex-budget-", "")
+      defer:
+        removeDir(root)
+      let payload = repeat("payload-line\n", 10_000) & "final-output\n"
+      let path = root / "output.txt"
+      writeFile(path, payload)
+      let session = spawnTerminalSession(
+        initTerminalSpawnOptions(
+          shell = "/bin/sh",
+          command =
+            "stty -echo; printf ready; IFS= read -r start; cat " & quoteShell(path) &
+            "; exit 7",
+        ),
+        columns = 60,
+        rows = 8,
+      )
+      defer:
+        session.close()
+      require session.pollUntilText("ready")
+      session.write("start\n")
+      var
+        bytesRead = 0
+        pauses = 0
+      let deadline = getMonoTime() + initDuration(seconds = 60)
+      while session.running() and getMonoTime() < deadline:
+        let polled = session.poll(timeBudget = initDuration(nanoseconds = 1))
+        bytesRead += polled.bytesRead
+        if polled.readPaused:
+          inc pauses
+          check not polled.processExited
+        if polled.bytesRead == 0:
+          sleep(1)
+      require not session.running()
+      check pauses > 1
+      # The PTY adds a carriage return to each newline.
+      check bytesRead == payload.len + 10_001
+      check session.exitCode == 7
+      check "final-output" in session.screen().plainText()
+
+    test "an empty live PTY is not reported as closed":
+      let session = spawnTerminalSession(
+        initTerminalSpawnOptions(
+          shell = "/bin/sh",
+          command = "stty -echo; printf ready; IFS= read -r start; printf finished",
+        ),
+        columns = 60,
+        rows = 8,
+      )
+      defer:
+        session.close()
+      require session.pollUntilText("ready")
+      let empty = session.poll(timeBudget = initDuration(milliseconds = 2))
+      check empty.bytesRead == 0
+      check not empty.readPaused
+      check not empty.outputClosed
+      check not empty.processExited
+      session.write("start\n")
+      require session.pollUntilExit()
+      check "finished" in session.screen().plainText()
+
+    test "child exit is collected when pending input can no longer be written":
+      let session = spawnTerminalSession(
+        initTerminalSpawnOptions(
+          shell = "/bin/sh",
+          # Neither the shell nor sleep drains input, so writes back up.
+          command = "stty raw -echo; printf ready; sleep 60",
+        ),
+        columns = 60,
+        rows = 8,
+      )
+      defer:
+        session.close()
+      require session.pollUntilText("ready")
+      session.write(repeat('x', session.writeLimit()))
+      require session.pendingWriteBytes() > 0
+      require session.terminate()
+      check session.pollUntilExit()
+      check session.pendingWriteBytes() == 0
+
     test "PTY drains styled output and reports the child exit status":
       let session = spawnTerminalSession(
         initTerminalSpawnOptions(command = "printf '\\033[31mred\\033[0m\\n'; exit 7"),
