@@ -192,6 +192,23 @@ func initTerminalSpawnOptions*(
 func terminalSessionsSupported*(): bool =
   defined(posix)
 
+when defined(posix):
+  proc duplicateReadDescriptor*[Cell, Line, Scrollback](
+      session: TerminexSession[Cell, Line, Scrollback]
+  ): cint =
+    ## Duplicate the PTY descriptor for an external readiness loop. Returns -1
+    ## if no PTY is open or duplication fails. The caller owns and must close
+    ## the duplicate; it must not read from it or change its blocking mode.
+    ## Observe readiness, then call poll() on the session's owning thread.
+    if session.xMasterFd < 0:
+      return -1
+    result = posix.dup(session.xMasterFd)
+    if result >= 0:
+      let flags = fcntl(result, F_GETFD)
+      if flags < 0 or fcntl(result, F_SETFD, flags or FD_CLOEXEC) < 0:
+        discard posix.close(result)
+        result = -1
+
 proc newTerminalSession*[
     Cell: TerminexCellAdapter,
     Line: TerminexLineAdapter[Cell],

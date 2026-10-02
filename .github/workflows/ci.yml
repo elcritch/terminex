@@ -8,7 +8,12 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        integration: [core, sigils]
+    runs-on: ${{ matrix.os }}
     env:
       NIM_VERSION: 2.2.10
     steps:
@@ -18,7 +23,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: deps
-          key: ${{ runner.os }}-nim-${{ env.NIM_VERSION }}-atlas-${{ hashFiles('terminex.nimble') }}
+          key: ${{ runner.os }}-${{ matrix.integration }}-nim-${{ env.NIM_VERSION }}-atlas-${{ hashFiles('terminex.nimble') }}
 
       - name: Install Atlas
         shell: bash
@@ -30,7 +35,18 @@ jobs:
         run: atlas env "$NIM_VERSION" --binary --github-path
 
       - name: Install dependencies
-        run: atlas install
+        run: atlas install ${{ matrix.integration == 'sigils' && '--features:sigils' || '' }}
 
       - name: Run tests
         run: atlas-run tests
+
+      - name: Test core without threads
+        if: matrix.integration == 'core'
+        run: atlas-run tests -- --threads:off
+
+      - name: Test worker ownership with ORC
+        if: matrix.integration == 'sigils'
+        run: atlas-run tests 'tests/tthreaded*.nim' -- --mm:orc
+
+      - name: Compile examples
+        run: atlas-run tests --compile-only examples/all_compile.nim
