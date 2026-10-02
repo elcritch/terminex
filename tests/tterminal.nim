@@ -494,6 +494,38 @@ suite "terminex terminal sessions":
       session.write("input")
 
   when defined(posix):
+    test "readiness descriptors are owned duplicates and close on exec":
+      let session = newTerminalSession()
+      check session.duplicateReadDescriptor() == -1
+      session.start(
+        initTerminalSpawnOptions(
+          shell = "/bin/sh",
+          command =
+            "stty -echo; printf 'ready\\n'; IFS= read -r line; printf 'received:%s' \"$line\"",
+        )
+      )
+      defer:
+        session.close()
+      let descriptor = session.duplicateReadDescriptor()
+      require descriptor >= 0
+      check (fcntl(descriptor, F_GETFD) and FD_CLOEXEC) != 0
+      check posix.close(descriptor) == 0
+      # Releasing the readiness observer must leave the session's PTY usable.
+      let readyDeadline = getMonoTime() + initDuration(seconds = 10)
+      while "ready" notin session.screen().plainText() and getMonoTime() < readyDeadline:
+        discard session.poll()
+        sleep(1)
+      require "ready" in session.screen().plainText()
+      session.write("duplicate-closed\n")
+      let exitDeadline = getMonoTime() + initDuration(seconds = 10)
+      while session.running() and getMonoTime() < exitDeadline:
+        discard session.poll()
+        sleep(1)
+      check session.state() == tssExited
+      check "received:duplicate-closed" in session.screen().plainText()
+      session.close()
+      check session.duplicateReadDescriptor() == -1
+
     test "time-budgeted polls preserve final output across child exit":
       let root = createTempDir("terminex-budget-", "")
       defer:
