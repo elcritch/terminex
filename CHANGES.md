@@ -1,5 +1,11 @@
 # Changes
 
+## Unreleased
+
+- Keep unsupported private CSI keyboard controls separate from text styling and
+  cursor commands. Keyboard capability queries no longer restore the saved
+  cursor, and modifier controls no longer leave terminal rows underlined or dim.
+
 ## 0.4.0
 
 - Add optional Sigils terminal sessions with exclusive worker ownership, ordered

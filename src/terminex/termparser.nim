@@ -269,9 +269,27 @@ proc processCsi[Cell, Line, Scrollback](
   let
     finalByte = sequence[^1]
     body = sequence[0 ..^ 2]
-    privateMode = body.len > 0 and body[0] == '?'
-    secondary = body.len > 0 and body[0] == '>'
-    parameterStart = if privateMode or secondary: 1 else: 0
+    privateMarker =
+      if body.len > 0 and body[0] in {'<', '=', '>', '?'}:
+        body[0]
+      else:
+        '\0'
+    privateMode = privateMarker == '?'
+    secondary = privateMarker == '>'
+    parameterStart = if privateMarker != '\0': 1 else: 0
+  # Private controls have their own meanings. Unsupported keyboard controls such
+  # as CSI > 4 ; 2 m and CSI ? u must not fall through to SGR or cursor restore.
+  case privateMarker
+  of '?':
+    if finalByte notin {'J', 'K', 'h', 'l', 'n'}:
+      return
+  of '>':
+    if finalByte != 'c':
+      return
+  of '<', '=':
+    return
+  else:
+    discard
   var
     parameterEnd = body.len
     intermediate = ""

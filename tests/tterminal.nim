@@ -326,6 +326,44 @@ suite "terminex terminal screen and parser":
     check screen.cellAt(0, 0).style.attributes == {}
     check screen.cellAt(0, 1).style.attributes == {}
 
+  test "keyboard modifier controls do not change graphic rendition":
+    for control in ["\x1b[>4;2m", "\x1b[?4m", "\x1b[>4;0m", "\x1b[>m"]:
+      for split in 0 .. control.len:
+        var
+          screen = initTerminalScreen(8, 3)
+          parser = initTerminalParser()
+        screen.feed(parser, "\x1b[31m")
+        let style = screen.style
+        screen.feed(parser, control[0 ..< split])
+        screen.feed(parser, control[split ..< control.len])
+        screen.feed(parser, "X\x1b[K\r\nY")
+
+        check screen.style == style
+        check screen.cellAt(0, 0).style == style
+        check screen.cellAt(0, 7).style == style
+        check screen.cellAt(1, 0).style == style
+        screen.resize(12, 5)
+        screen.feed(parser, "\x1b[2J")
+        for row in 0 ..< screen.rows:
+          for cell in screen.lineAt(row):
+            check cell.style == style
+
+  test "keyboard protocol controls do not restore the saved cursor":
+    for control in ["\x1b[?u", "\x1b[>1u", "\x1b[=1u", "\x1b[<u"]:
+      for split in 0 .. control.len:
+        var
+          screen = initTerminalScreen(20, 5)
+          parser = initTerminalParser()
+        screen.feed(parser, "\x1b[2;3H\x1b[s\x1b[4;7H")
+        screen.feed(parser, control[0 ..< split])
+        screen.feed(parser, control[split ..< control.len])
+        screen.feed(parser, "/")
+
+        check screen.cellAt(3, 6).text == "/"
+        check screen.cursor.position == initTerminalPosition(3, 7)
+        screen.feed(parser, "\x1b[u")
+        check screen.cursor.position == initTerminalPosition(1, 2)
+
   test "OSC metadata hyperlinks and clipboard requests terminate across chunks":
     var
       screen = initTerminalScreen(12, 2)
