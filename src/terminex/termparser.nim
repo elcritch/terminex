@@ -290,13 +290,13 @@ proc processCsi[Cell, Line, Scrollback](
     return
   else:
     discard
-  var
-    parameterEnd = body.len
-    intermediate = ""
-  while parameterEnd > parameterStart and body[parameterEnd - 1] in {' ' .. '/'}:
-    dec parameterEnd
-  if parameterEnd < body.len:
-    intermediate = body[parameterEnd ..< body.len]
+  var parameterEnd = parameterStart
+  while parameterEnd < body.len and body[parameterEnd] in {'0' .. '9', ';', ':'}:
+    inc parameterEnd
+  let intermediate = body[parameterEnd ..< body.len]
+  if intermediate.len > 0 and
+      not (privateMarker == '\0' and finalByte == 'q' and intermediate == " "):
+    return
   let parameters = parseParameters(body[parameterStart ..< parameterEnd])
   let first = parameterValue(parameters, 0, 1)
 
@@ -340,7 +340,9 @@ proc processCsi[Cell, Line, Scrollback](
   of 'S':
     screen.scrollUp(first)
   of 'T':
-    screen.scrollDown(first)
+    # The five-parameter form starts unsupported mouse highlight tracking.
+    if parameters.len == 1:
+      screen.scrollDown(first)
   of 'b':
     screen.repeatLastText(first)
   of 'c':

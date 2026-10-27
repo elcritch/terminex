@@ -5,6 +5,8 @@
 - Keep unsupported private CSI keyboard controls separate from text styling and
   cursor commands. Keyboard capability queries no longer restore the saved
   cursor, and modifier controls no longer leave terminal rows underlined or dim.
+- Ignore unsupported CSI intermediate forms and mouse highlight tracking rather
+  than treating them as text deletion, scrolling, or margin changes.
 
 ## 0.4.0
 

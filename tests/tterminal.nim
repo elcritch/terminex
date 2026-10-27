@@ -364,6 +364,30 @@ suite "terminex terminal screen and parser":
         screen.feed(parser, "\x1b[u")
         check screen.cursor.position == initTerminalPosition(1, 2)
 
+  test "unsupported CSI variants do not edit the screen or move the cursor":
+    for control in [
+      "\x1b[#P", "\x1b[#S", "\x1b[1;2;4;8;1$r", "\x1b[1$2A", "\x1b[1;2;3;4;5T"
+    ]:
+      for split in 0 .. control.len:
+        var
+          screen = initTerminalScreen(8, 7)
+          parser = initTerminalParser()
+        screen.feed(parser, "row0\r\nrow1\r\nrow2\r\nrow3\r\nrow4\r\nrow5\r\nrow6")
+        screen.feed(parser, "\x1b[3;7r\x1b[4;2H")
+        let
+          text = screen.plainText(includeScrollback = false)
+          cursor = screen.cursor.position
+        screen.feed(parser, control[0 ..< split])
+        screen.feed(parser, control[split ..< control.len])
+
+        check screen.plainText(includeScrollback = false) == text
+        check screen.cursor.position == cursor
+        check screen.scrollTop == 2
+        check screen.scrollBottom == 6
+        check screen.scrollbackCount == 0
+        screen.feed(parser, "X")
+        check screen.cellAt(3, 1).text == "X"
+
   test "OSC metadata hyperlinks and clipboard requests terminate across chunks":
     var
       screen = initTerminalScreen(12, 2)
