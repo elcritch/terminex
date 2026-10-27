@@ -1,6 +1,6 @@
 # Changes
 
-## Unreleased
+## 0.4.1
 
 - Keep unsupported private CSI keyboard controls separate from text styling and
   cursor commands. Keyboard capability queries no longer restore the saved
