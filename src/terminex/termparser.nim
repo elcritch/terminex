@@ -1,6 +1,6 @@
 ## Incremental ECMA-48/VT parser that applies terminal output to a screen.
 
-import std/[base64, parseutils, strutils]
+import std/[base64, strutils]
 
 import ./termscreen
 
@@ -10,6 +10,10 @@ const
   ReplacementCharacter = "\xef\xbf\xbd"
 
 type
+  CsiParameter = object
+    value: int
+    subparameters: seq[int]
+
   TerminexParserState* = enum
     tpsGround
     tpsEscape
@@ -19,165 +23,198 @@ type
     tpsString
     tpsStringEscape
     tpsCharset
+    tpsCsiIgnore
 
   TerminexParser* = object
     state*: TerminexParserState
     sequence: string
     incompleteUtf8: string
+    discardingOsc: bool
 
 func initTerminalParser*(): TerminexParser =
   TerminexParser(state: tpsGround)
 
+proc parseDecimal(value: string, number: var int): bool =
+  if value.len == 0:
+    return
+  number = 0
+  for character in value:
+    if character notin {'0' .. '9'}:
+      return
+    let digit = ord(character) - ord('0')
+    if number > (high(int) - digit) div 10:
+      return
+    number = number * 10 + digit
+  true
+
 func parameterValue(
-    parameters: openArray[int], index, fallback: int, zeroIsFallback = true
+    parameters: openArray[CsiParameter], index, fallback: int, zeroIsFallback = true
 ): int =
   if index >= parameters.len:
     return fallback
-  if zeroIsFallback and parameters[index] == 0:
+  if zeroIsFallback and parameters[index].value == 0:
     fallback
   else:
-    parameters[index]
+    parameters[index].value
 
-proc parseParameters(value: string): seq[int] =
-  if value.len == 0:
-    return @[0]
-  var parameter = ""
-  for character in value:
-    if character in {';', ':'}:
-      if parameter.len == 0:
-        result.add 0
-      else:
-        result.add parseInt(parameter)
-      parameter.setLen(0)
-    elif character in {'0' .. '9'}:
-      parameter.add character
-  if parameter.len == 0:
-    result.add 0
-  else:
-    result.add parseInt(parameter)
+proc parseParameters(value: string): seq[CsiParameter] =
+  for group in value.split(';'):
+    let fields = group.split(':')
+    var parameter: CsiParameter
+    if fields[0].len > 0 and not parseDecimal(fields[0], parameter.value):
+      return @[]
+    for index in 1 ..< fields.len:
+      var subparameter = -1
+      if fields[index].len > 0 and not parseDecimal(fields[index], subparameter):
+        return @[]
+      parameter.subparameters.add subparameter
+    result.add parameter
+
+proc applyColonColor(color: var TerminexColor, values: openArray[int]) =
+  if values.len == 2 and values[0] == 5 and values[1] >= 0:
+    color = indexedTerminalColor(uint8(clamp(values[1], 0, 255)))
+  elif values.len in {4, 5} and values[0] == 2:
+    # The standard form includes a colorspace field, which xterm ignores.
+    let first = if values.len == 5: 2 else: 1
+    if values[first] >= 0 and values[first + 1] >= 0 and values[first + 2] >= 0:
+      color = rgbTerminalColor(
+        uint8(clamp(values[first], 0, 255)),
+        uint8(clamp(values[first + 1], 0, 255)),
+        uint8(clamp(values[first + 2], 0, 255)),
+      )
 
 proc applyExtendedColor(
-    color: var TerminexColor, parameters: openArray[int], index: var int
+    color: var TerminexColor, parameters: openArray[CsiParameter], index: var int
 ) =
+  if parameters[index].subparameters.len > 0:
+    color.applyColonColor(parameters[index].subparameters)
+    inc index
+    return
   if index + 1 >= parameters.len:
     inc index
     return
-  case parameters[index + 1]
+  if parameters[index + 1].subparameters.len > 0:
+    var values = @[parameters[index + 1].value]
+    values.add parameters[index + 1].subparameters
+    color.applyColonColor(values)
+    inc index, 2
+    return
+  case parameters[index + 1].value
   of 5:
     if index + 2 < parameters.len:
-      color = indexedTerminalColor(uint8(clamp(parameters[index + 2], 0, 255)))
+      if parameters[index + 2].subparameters.len == 0:
+        color = indexedTerminalColor(uint8(clamp(parameters[index + 2].value, 0, 255)))
       inc index, 3
     else:
       inc index, 2
   of 2:
     if index + 4 < parameters.len:
-      color = rgbTerminalColor(
-        uint8(clamp(parameters[index + 2], 0, 255)),
-        uint8(clamp(parameters[index + 3], 0, 255)),
-        uint8(clamp(parameters[index + 4], 0, 255)),
-      )
+      if parameters[index + 2].subparameters.len == 0 and
+          parameters[index + 3].subparameters.len == 0 and
+          parameters[index + 4].subparameters.len == 0:
+        color = rgbTerminalColor(
+          uint8(clamp(parameters[index + 2].value, 0, 255)),
+          uint8(clamp(parameters[index + 3].value, 0, 255)),
+          uint8(clamp(parameters[index + 4].value, 0, 255)),
+        )
       inc index, 5
     else:
       index = parameters.len
   else:
     inc index, 2
 
+proc applyUnderline(style: var TerminexStyle, value: int) =
+  case value
+  of 0:
+    style.attributes.excl taUnderline
+    style.attributes.excl taDoubleUnderline
+  of 1:
+    style.attributes.excl taDoubleUnderline
+    style.attributes.incl taUnderline
+  of 2:
+    style.attributes.excl taUnderline
+    style.attributes.incl taDoubleUnderline
+  else:
+    discard
+
+proc applyGraphicAttribute[Cell, Line, Scrollback](
+    screen: var TerminexScreen[Cell, Line, Scrollback], code: int
+) =
+  case code
+  of 0:
+    screen.style = initTerminalStyle()
+  of 1:
+    screen.style.attributes.incl taBold
+  of 2:
+    screen.style.attributes.incl taFaint
+  of 3:
+    screen.style.attributes.incl taItalic
+  of 4:
+    screen.style.applyUnderline(1)
+  of 5, 6:
+    screen.style.attributes.incl taBlink
+  of 7:
+    screen.style.attributes.incl taInverse
+  of 8:
+    screen.style.attributes.incl taHidden
+  of 9:
+    screen.style.attributes.incl taStrikethrough
+  of 21:
+    screen.style.applyUnderline(2)
+  of 22:
+    screen.style.attributes.excl taBold
+    screen.style.attributes.excl taFaint
+  of 23:
+    screen.style.attributes.excl taItalic
+  of 24:
+    screen.style.applyUnderline(0)
+  of 25:
+    screen.style.attributes.excl taBlink
+  of 27:
+    screen.style.attributes.excl taInverse
+  of 28:
+    screen.style.attributes.excl taHidden
+  of 29:
+    screen.style.attributes.excl taStrikethrough
+  of 30 .. 37:
+    screen.style.foreground = indexedTerminalColor(uint8(code - 30))
+  of 39:
+    screen.style.foreground = defaultTerminalColor()
+  of 40 .. 47:
+    screen.style.background = indexedTerminalColor(uint8(code - 40))
+  of 49:
+    screen.style.background = defaultTerminalColor()
+  of 53:
+    screen.style.attributes.incl taOverline
+  of 55:
+    screen.style.attributes.excl taOverline
+  of 59:
+    screen.style.underlineColor = defaultTerminalColor()
+  of 90 .. 97:
+    screen.style.foreground = indexedTerminalColor(uint8(code - 90 + 8))
+  of 100 .. 107:
+    screen.style.background = indexedTerminalColor(uint8(code - 100 + 8))
+  else:
+    discard
+
 proc applyGraphicRendition[Cell, Line, Scrollback](
-    screen: var TerminexScreen[Cell, Line, Scrollback], parameters: seq[int]
+    screen: var TerminexScreen[Cell, Line, Scrollback], parameters: seq[CsiParameter]
 ) =
   var index = 0
   while index < parameters.len:
-    let code = parameters[index]
-    case code
-    of 0:
-      screen.style = initTerminalStyle()
-      inc index
-    of 1:
-      screen.style.attributes.incl taBold
-      inc index
-    of 2:
-      screen.style.attributes.incl taFaint
-      inc index
-    of 3:
-      screen.style.attributes.incl taItalic
-      inc index
-    of 4:
-      screen.style.attributes.excl taDoubleUnderline
-      screen.style.attributes.incl taUnderline
-      inc index
-    of 5, 6:
-      screen.style.attributes.incl taBlink
-      inc index
-    of 7:
-      screen.style.attributes.incl taInverse
-      inc index
-    of 8:
-      screen.style.attributes.incl taHidden
-      inc index
-    of 9:
-      screen.style.attributes.incl taStrikethrough
-      inc index
-    of 21:
-      screen.style.attributes.excl taUnderline
-      screen.style.attributes.incl taDoubleUnderline
-      inc index
-    of 22:
-      screen.style.attributes.excl taBold
-      screen.style.attributes.excl taFaint
-      inc index
-    of 23:
-      screen.style.attributes.excl taItalic
-      inc index
-    of 24:
-      screen.style.attributes.excl taUnderline
-      screen.style.attributes.excl taDoubleUnderline
-      inc index
-    of 25:
-      screen.style.attributes.excl taBlink
-      inc index
-    of 27:
-      screen.style.attributes.excl taInverse
-      inc index
-    of 28:
-      screen.style.attributes.excl taHidden
-      inc index
-    of 29:
-      screen.style.attributes.excl taStrikethrough
-      inc index
-    of 30 .. 37:
-      screen.style.foreground = indexedTerminalColor(uint8(code - 30))
-      inc index
+    let parameter = parameters[index]
+    case parameter.value
     of 38:
       applyExtendedColor(screen.style.foreground, parameters, index)
-    of 39:
-      screen.style.foreground = defaultTerminalColor()
-      inc index
-    of 40 .. 47:
-      screen.style.background = indexedTerminalColor(uint8(code - 40))
-      inc index
     of 48:
       applyExtendedColor(screen.style.background, parameters, index)
-    of 49:
-      screen.style.background = defaultTerminalColor()
-      inc index
-    of 53:
-      screen.style.attributes.incl taOverline
-      inc index
-    of 55:
-      screen.style.attributes.excl taOverline
-      inc index
     of 58:
       applyExtendedColor(screen.style.underlineColor, parameters, index)
-    of 59:
-      screen.style.underlineColor = defaultTerminalColor()
-      inc index
-    of 90 .. 97:
-      screen.style.foreground = indexedTerminalColor(uint8(code - 90 + 8))
-      inc index
-    of 100 .. 107:
-      screen.style.background = indexedTerminalColor(uint8(code - 100 + 8))
-      inc index
     else:
+      if parameter.subparameters.len == 0:
+        screen.applyGraphicAttribute(parameter.value)
+      elif parameter.value == 4 and parameter.subparameters.len == 1:
+        screen.style.applyUnderline(parameter.subparameters[0])
       inc index
 
 proc setPrivateMode[Cell, Line, Scrollback](
@@ -227,13 +264,13 @@ proc setPrivateMode[Cell, Line, Scrollback](
 
 proc applyMode[Cell, Line, Scrollback](
     screen: var TerminexScreen[Cell, Line, Scrollback],
-    parameters: seq[int],
+    parameters: seq[CsiParameter],
     privateMode, enabled: bool,
 ) =
   for mode in parameters:
     if privateMode:
-      screen.setPrivateMode(mode, enabled)
-    elif mode == 4:
+      screen.setPrivateMode(mode.value, enabled)
+    elif mode.value == 4:
       screen.modes.insert = enabled
 
 proc setCursorStyle[Cell, Line, Scrollback](
@@ -269,17 +306,41 @@ proc processCsi[Cell, Line, Scrollback](
   let
     finalByte = sequence[^1]
     body = sequence[0 ..^ 2]
-    privateMode = body.len > 0 and body[0] == '?'
-    secondary = body.len > 0 and body[0] == '>'
-    parameterStart = if privateMode or secondary: 1 else: 0
-  var
-    parameterEnd = body.len
-    intermediate = ""
-  while parameterEnd > parameterStart and body[parameterEnd - 1] in {' ' .. '/'}:
-    dec parameterEnd
-  if parameterEnd < body.len:
-    intermediate = body[parameterEnd ..< body.len]
+    privateMarker =
+      if body.len > 0 and body[0] in {'<', '=', '>', '?'}:
+        body[0]
+      else:
+        '\0'
+    privateMode = privateMarker == '?'
+    secondary = privateMarker == '>'
+    parameterStart = if privateMarker != '\0': 1 else: 0
+  # Private controls have their own meanings. Unsupported keyboard controls such
+  # as CSI > 4 ; 2 m and CSI ? u must not fall through to SGR or cursor restore.
+  case privateMarker
+  of '?':
+    if finalByte notin {'J', 'K', 'h', 'l', 'n'}:
+      return
+  of '>':
+    if finalByte != 'c':
+      return
+  of '<', '=':
+    return
+  else:
+    discard
+  var parameterEnd = parameterStart
+  while parameterEnd < body.len and body[parameterEnd] in {'0' .. '9', ';', ':'}:
+    inc parameterEnd
+  let intermediate = body[parameterEnd ..< body.len]
+  if intermediate.len > 0 and
+      not (privateMarker == '\0' and finalByte == 'q' and intermediate == " "):
+    return
   let parameters = parseParameters(body[parameterStart ..< parameterEnd])
+  if parameters.len == 0:
+    return
+  if finalByte != 'm':
+    for parameter in parameters:
+      if parameter.subparameters.len > 0:
+        return
   let first = parameterValue(parameters, 0, 1)
 
   case finalByte
@@ -298,7 +359,7 @@ proc processCsi[Cell, Line, Scrollback](
     screen.moveCursorRelative(-first, 0)
     screen.carriageReturn()
   of 'G', '`':
-    screen.moveCursor(screen.cursor.position.row, first - 1)
+    screen.moveCursorRelative(0, (first - 1) - screen.cursor.position.column)
   of 'H', 'f':
     screen.moveCursor(
       parameterValue(parameters, 0, 1) - 1, parameterValue(parameters, 1, 1) - 1
@@ -322,7 +383,9 @@ proc processCsi[Cell, Line, Scrollback](
   of 'S':
     screen.scrollUp(first)
   of 'T':
-    screen.scrollDown(first)
+    # The five-parameter form starts unsupported mouse highlight tracking.
+    if parameters.len == 1:
+      screen.scrollDown(first)
   of 'b':
     screen.repeatLastText(first)
   of 'c':
@@ -375,7 +438,7 @@ proc processOsc[Cell, Line, Scrollback](
   if separator < 0:
     return
   var command = 0
-  if parseInt(sequence, command, 0) != separator:
+  if not parseDecimal(sequence[0 ..< separator], command):
     return
   let payload = sequence[separator + 1 ..< sequence.len]
   case command
@@ -491,8 +554,10 @@ func validUtf8Sequence(value: string): bool =
 proc finishOsc[Cell, Line, Scrollback](
     parser: var TerminexParser, screen: var TerminexScreen[Cell, Line, Scrollback]
 ) =
-  screen.processOsc(parser.sequence)
+  if not parser.discardingOsc:
+    screen.processOsc(parser.sequence)
   parser.sequence.setLen(0)
+  parser.discardingOsc = false
   parser.state = tpsGround
 
 proc feed*[Cell, Line, Scrollback](
@@ -532,23 +597,29 @@ proc feed*[Cell, Line, Scrollback](
           else:
             screen.writeText(ReplacementCharacter)
     of tpsEscape:
-      case character
-      of '[':
-        parser.sequence.setLen(0)
-        parser.state = tpsCsi
-      of ']':
-        parser.sequence.setLen(0)
-        parser.state = tpsOsc
-      of 'P', 'X', '^', '_':
-        parser.sequence.setLen(0)
-        parser.state = tpsString
-      of '(', ')', '*', '+', '#':
-        parser.state = tpsCharset
-      of '\\':
+      if character == '\x1b' or character == '\x7f':
+        discard
+      elif character in {'\x18', '\x1a'}:
         parser.state = tpsGround
+      elif character < '\x20':
+        screen.processControl(character)
       else:
-        screen.processEscape(character)
-        parser.state = tpsGround
+        case character
+        of '[':
+          parser.sequence.setLen(0)
+          parser.state = tpsCsi
+        of ']':
+          parser.sequence.setLen(0)
+          parser.discardingOsc = false
+          parser.state = tpsOsc
+        of 'P', 'X', '^', '_':
+          parser.sequence.setLen(0)
+          parser.state = tpsString
+        of '\x20' .. '\x2f':
+          parser.state = tpsCharset
+        else:
+          screen.processEscape(character)
+          parser.state = tpsGround
     of tpsCsi:
       if character in {'\x40' .. '\x7e'}:
         parser.sequence.add character
@@ -560,7 +631,7 @@ proc feed*[Cell, Line, Scrollback](
           parser.sequence.add character
         else:
           parser.sequence.setLen(0)
-          parser.state = tpsGround
+          parser.state = tpsCsiIgnore
       elif character == '\x1b':
         parser.sequence.setLen(0)
         parser.state = tpsEscape
@@ -569,9 +640,16 @@ proc feed*[Cell, Line, Scrollback](
         parser.state = tpsGround
       elif character < '\x20':
         screen.processControl(character)
-      else:
+      elif character != '\x7f':
         parser.sequence.setLen(0)
         parser.state = tpsGround
+    of tpsCsiIgnore:
+      if character == '\x1b':
+        parser.state = tpsEscape
+      elif character in {'\x18', '\x1a', '\x40' .. '\x7e'}:
+        parser.state = tpsGround
+      elif character < '\x20':
+        screen.processControl(character)
     of tpsOsc:
       if character == '\x07':
         parser.finishOsc(screen)
@@ -579,41 +657,52 @@ proc feed*[Cell, Line, Scrollback](
         parser.state = tpsOscEscape
       elif character in {'\x18', '\x1a'}:
         parser.sequence.setLen(0)
+        parser.discardingOsc = false
         parser.state = tpsGround
-      elif parser.sequence.len < MaxTerminalStringBytes:
-        parser.sequence.add character
-      else:
-        parser.sequence.setLen(0)
-        parser.state = tpsGround
-    of tpsOscEscape:
-      if character == '\\':
-        parser.finishOsc(screen)
-      else:
-        if parser.sequence.len + 2 < MaxTerminalStringBytes:
-          parser.sequence.add '\x1b'
+      elif not parser.discardingOsc:
+        if parser.sequence.len < MaxTerminalStringBytes:
           parser.sequence.add character
-          parser.state = tpsOsc
         else:
           parser.sequence.setLen(0)
-          parser.state = tpsGround
+          parser.discardingOsc = true
+    of tpsOscEscape:
+      if character in {'\\', '\x07'}:
+        parser.finishOsc(screen)
+      elif character in {'\x18', '\x1a'}:
+        parser.sequence.setLen(0)
+        parser.discardingOsc = false
+        parser.state = tpsGround
+      else:
+        let extra = if character == '\x1b': 1 else: 2
+        if not parser.discardingOsc:
+          if parser.sequence.len <= MaxTerminalStringBytes - extra:
+            parser.sequence.add '\x1b'
+            if character != '\x1b':
+              parser.sequence.add character
+          else:
+            parser.sequence.setLen(0)
+            parser.discardingOsc = true
+        if character != '\x1b':
+          parser.state = tpsOsc
     of tpsString:
       if character == '\x1b':
         parser.state = tpsStringEscape
-      elif character == '\x07' or character in {'\x18', '\x1a'}:
-        parser.state = tpsGround
-      elif parser.sequence.len < MaxTerminalStringBytes:
-        parser.sequence.add character
-      else:
+      elif character in {'\x18', '\x1a'}:
         parser.sequence.setLen(0)
         parser.state = tpsGround
     of tpsStringEscape:
-      if character == '\\':
+      if character in {'\\', '\x18', '\x1a'}:
         parser.sequence.setLen(0)
         parser.state = tpsGround
-      else:
+      elif character != '\x1b':
         parser.state = tpsString
     of tpsCharset:
-      parser.state = tpsGround
+      if character == '\x1b':
+        parser.state = tpsEscape
+      elif character in {'\x18', '\x1a', '\x30' .. '\x7e'}:
+        parser.state = tpsGround
+      elif character < '\x20':
+        screen.processControl(character)
     inc index
 
 proc reset*(parser: var TerminexParser) =

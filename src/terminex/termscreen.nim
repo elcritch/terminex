@@ -10,6 +10,7 @@ const
   DefaultTerminalColumns* = 80
   DefaultTerminalRows* = 24
   DefaultTerminalScrollback* = 10_000
+  MaxTerminalRepeatCount* = 65_535 ## Bound the work performed by one REP command.
 
 type
   TerminexColorKind* = enum
@@ -89,35 +90,33 @@ type
     shape*: TerminexCursorShape
 
   TerminexSavedState = object
-    cursor: TerminexCursor
+    position: TerminexPosition
     style: TerminexStyle
-    modes: TerminexModes
+    origin: bool
     wrapPending: bool
 
   ## A cell implementation accepted by `TerminexScreen`. Custom cell types
   ## supply the `initTerminalCell`, `cellText`, `cellStyle`, and
   ## `cellContinuation` accessors documented below.
-  TerminexCellAdapter* =
-    concept cell
-        mixin initTerminalCell, cellText, cellStyle, cellContinuation
-        var writable: typeof(cell)
-        initTerminalCell(typeof(cell), "", initTerminalStyle()) is typeof(cell)
-        cellText(cell) is string
-        cellStyle(cell) is TerminexStyle
-        cellContinuation(cell) is bool
-        writable.cellText = ""
-        writable.cellStyle = initTerminalStyle()
-        writable.cellContinuation = false
+  TerminexCellAdapter* = concept cell
+    mixin initTerminalCell, cellText, cellStyle, cellContinuation
+    var writable: typeof(cell)
+    initTerminalCell(typeof(cell), "", initTerminalStyle()) is typeof(cell)
+    cellText(cell) is string
+    cellStyle(cell) is TerminexStyle
+    cellContinuation(cell) is bool
+    writable.cellText = ""
+    writable.cellStyle = initTerminalStyle()
+    writable.cellContinuation = false
 
   ## A line implementation accepted by `TerminexScreen`.
-  TerminexLineAdapter*[Cell] =
-    concept line
-        mixin initTerminalLine, len, `[]`, `[]=`
-        var writable: typeof(line)
-        initTerminalLine(typeof(line), 1) is typeof(line)
-        line.len is int
-        line[0] is Cell
-        writable[0] = line[0]
+  TerminexLineAdapter*[Cell] = concept line
+    mixin initTerminalLine, len, `[]`, `[]=`
+    var writable: typeof(line)
+    initTerminalLine(typeof(line), 1) is typeof(line)
+    line.len is int
+    line[0] is Cell
+    writable[0] = line[0]
 
   ## A bounded scrollback container accepted by `TerminexScreen`.
   ##
@@ -125,17 +124,16 @@ type
   ## `add` implementation is responsible for enforcing that capacity. A
   ## container may additionally implement `[]` to make `lineAtAbsolute`
   ## indexed rather than iterator-based.
-  TerminexScrollbackAdapter*[Line] =
-    concept scrollback
-        mixin initScrollback, len, items, add, clear
-        var writable: typeof(scrollback)
-        var storedLine: Line
-        initScrollback(typeof(scrollback), 0) is typeof(scrollback)
-        scrollback.len is int
-        for item in scrollback:
-          item is Line
-        writable.add(storedLine)
-        writable.clear()
+  TerminexScrollbackAdapter*[Line] = concept scrollback
+    mixin initScrollback, len, items, add, clear
+    var writable: typeof(scrollback)
+    var storedLine: Line
+    initScrollback(typeof(scrollback), 0) is typeof(scrollback)
+    scrollback.len is int
+    for item in scrollback:
+      item is Line
+    writable.add(storedLine)
+    writable.clear()
 
   TerminexScreen*[Cell = TerminexCell, Line = seq[Cell], Scrollback = RingBuffer[Line]] = object
     columns*, rows*: int
@@ -160,7 +158,6 @@ type
     saved: TerminexSavedState
     primaryCells: seq[Cell]
     primaryRowOrigin: int
-    primaryCursor: TerminexCursor
     primarySaved: TerminexSavedState
     wrapPending: bool
     lastPrintedText: string
@@ -636,8 +633,10 @@ proc deleteCells*[Cell, Line, Scrollback](
 proc eraseCells*[Cell, Line, Scrollback](
     screen: var TerminexScreen[Cell, Line, Scrollback], count = 1
 ) =
-  let last = min(screen.cursor.position.column + max(count, 1) - 1, screen.columns - 1)
-  screen.clearRange(screen.cursor.position.row, screen.cursor.position.column, last)
+  let
+    column = screen.cursor.position.column
+    amount = clamp(count, 1, screen.columns - column)
+  screen.clearRange(screen.cursor.position.row, column, column + amount - 1)
   screen.markChanged()
 
 proc insertLines*[Cell, Line, Scrollback](
@@ -735,7 +734,7 @@ proc repeatLastText*[Cell, Line, Scrollback](
     screen: var TerminexScreen[Cell, Line, Scrollback], count = 1
 ) =
   if screen.lastPrintedText.len > 0:
-    for _ in 0 ..< max(count, 1):
+    for _ in 0 ..< clamp(count, 1, MaxTerminalRepeatCount):
       screen.writeText(screen.lastPrintedText)
 
 proc moveCursor*[Cell, Line, Scrollback](
@@ -748,7 +747,7 @@ proc moveCursor*[Cell, Line, Scrollback](
     else:
       screen.rows - 1
   screen.cursor.position = initTerminalPosition(
-    clamp(row + rowMin, rowMin, rowMax), clamp(column, 0, screen.columns - 1)
+    rowMin + clamp(row, 0, rowMax - rowMin), clamp(column, 0, screen.columns - 1)
   )
   screen.wrapPending = false
   screen.markChanged()
@@ -763,9 +762,11 @@ proc moveCursorRelative*[Cell, Line, Scrollback](
         screen.scrollBottom
       else:
         screen.rows - 1
-  screen.cursor.position.row = clamp(screen.cursor.position.row + rows, rowMin, rowMax)
+  let row = screen.cursor.position.row
+  screen.cursor.position.row = row + clamp(rows, rowMin - row, rowMax - row)
+  let column = screen.cursor.position.column
   screen.cursor.position.column =
-    clamp(screen.cursor.position.column + columns, 0, screen.columns - 1)
+    column + clamp(columns, -column, screen.columns - 1 - column)
   screen.wrapPending = false
   screen.markChanged()
 
@@ -822,18 +823,18 @@ proc saveCursor*[Cell, Line, Scrollback](
     screen: var TerminexScreen[Cell, Line, Scrollback]
 ) =
   screen.saved = TerminexSavedState(
-    cursor: screen.cursor,
+    position: screen.cursor.position,
     style: screen.style,
-    modes: screen.modes,
+    origin: screen.modes.origin,
     wrapPending: screen.wrapPending,
   )
 
 proc restoreCursor*[Cell, Line, Scrollback](
     screen: var TerminexScreen[Cell, Line, Scrollback]
 ) =
-  screen.cursor = screen.saved.cursor
+  screen.cursor.position = screen.saved.position
   screen.style = screen.saved.style
-  screen.modes = screen.saved.modes
+  screen.modes.origin = screen.saved.origin
   screen.wrapPending = screen.saved.wrapPending
   screen.cursor.position.row = clamp(screen.cursor.position.row, 0, screen.rows - 1)
   screen.cursor.position.column =
@@ -850,7 +851,6 @@ proc useAlternateScreen*[Cell, Line, Scrollback](
       screen.saveCursor()
     screen.primaryCells = move(screen.cells)
     screen.primaryRowOrigin = screen.rowOrigin
-    screen.primaryCursor = screen.cursor
     screen.primarySaved = screen.saved
     screen.cells = newSeqWith(screen.columns * screen.rows, screen.makeCell())
     screen.rowOrigin = 0
@@ -863,12 +863,12 @@ proc useAlternateScreen*[Cell, Line, Scrollback](
     screen.rowOrigin = screen.primaryRowOrigin
     screen.primaryRowOrigin = 0
     screen.alternateScreen = false
-    if saveRestore:
-      screen.cursor = screen.primaryCursor
-      screen.saved = screen.primarySaved
+    screen.saved = screen.primarySaved
     screen.wrapPending = false
   screen.scrollTop = 0
   screen.scrollBottom = screen.rows - 1
+  if not enabled and saveRestore:
+    screen.restoreCursor()
   screen.markChanged()
 
 proc queueReply*[Cell, Line, Scrollback](
