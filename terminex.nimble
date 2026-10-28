@@ -1,4 +1,4 @@
-version       = "0.4.1"
+version       = "0.4.2"
 author        = "Terminex contributors"
 description   = "Reusable terminal-emulator state, ANSI parser, input encoder, and PTY transport."
 license       = "BSD-3"
