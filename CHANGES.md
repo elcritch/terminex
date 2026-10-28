@@ -1,5 +1,10 @@
 # Changes
 
+## 0.4.2
+
+- Include the complete terminal parsing, numeric bounds, escape framing, and
+  cursor restoration fixes in version-based dependency resolution.
+
 ## 0.4.1
 
 - Keep unsupported private CSI keyboard controls separate from text styling and
