@@ -47,6 +47,12 @@ The input helpers turn frontend key, mouse, paste, and focus events into termina
 bytes. `TerminexSpawnOptions.terminalProgram` defaults to `"Terminex"`; set it
 to an empty string to omit `TERM_PROGRAM`.
 
+The parser ignores numeric selectors outside Nim's `int` range and clamps cursor
+and erase counts to the screen. One REP command (`CSI Ps b`) writes at most
+`MaxTerminalRepeatCount` (65,535) copies, bounding work from a single sequence.
+Unsupported strings and oversized OSC payloads stay discarded until their
+terminator or cancellation, without leaking their contents into terminal text.
+
 GUI event loops can call `session.poll(timeBudget = initDuration(milliseconds = 2))`
 to yield between read chunks. Import `std/times` for `initDuration`. The budget
 is checked between chunks, so a single chunk can exceed it. `readPaused` means

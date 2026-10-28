@@ -326,6 +326,123 @@ suite "terminex terminal screen and parser":
     check screen.cellAt(0, 0).style.attributes == {}
     check screen.cellAt(0, 1).style.attributes == {}
 
+  test "colon SGR colors retain their groups and independent following attributes":
+    for code in [38, 48, 58]:
+      for separator in [":", ";"]:
+        for values in ["2::120:130:4", "2:0:120:130:4", "2:120:130:4"]:
+          let control = "\x1b[" & $code & separator & values & ";1m"
+          for split in 0 .. control.len:
+            var
+              screen = initTerminalScreen(8, 2)
+              parser = initTerminalParser()
+            screen.feed(parser, control[0 ..< split])
+            screen.feed(parser, control[split ..< control.len] & "X")
+            let style = screen.cellAt(0, 0).style
+            check style.attributes == {taBold}
+            case code
+            of 38:
+              check style.foreground == rgbTerminalColor(120, 130, 4)
+            of 48:
+              check style.background == rgbTerminalColor(120, 130, 4)
+            else:
+              check style.underlineColor == rgbTerminalColor(120, 130, 4)
+
+    var
+      screen = initTerminalScreen(8, 2)
+      parser = initTerminalParser()
+    screen.feed(parser, "\x1b[38:5:196;48:5:17;58:5:24mX")
+    check screen.style.foreground == indexedTerminalColor(196)
+    check screen.style.background == indexedTerminalColor(17)
+    check screen.style.underlineColor == indexedTerminalColor(24)
+    check screen.style.attributes == {}
+    screen.feed(parser, "\x1b[0m\x1b[38;5:196;48;5:17;58;5:24mX")
+    check screen.style.foreground == indexedTerminalColor(196)
+    check screen.style.background == indexedTerminalColor(17)
+    check screen.style.underlineColor == indexedTerminalColor(24)
+    check screen.style.attributes == {}
+
+  test "underline subparameters never become unrelated graphic attributes":
+    for entry in [
+      ("4:0", {taBold}),
+      ("4:1", {taBold, taUnderline}),
+      ("4:2", {taBold, taDoubleUnderline}),
+      ("4:3", {taBold}),
+      ("4:4", {taBold}),
+      ("4:5", {taBold}),
+      ("0:4", {taBold}),
+      ("1:2", {taBold}),
+      ("38:2::120:130;4", {taBold, taUnderline}),
+    ]:
+      var
+        screen = initTerminalScreen(8, 2)
+        parser = initTerminalParser()
+      screen.feed(parser, "\x1b[1;31m\x1b[" & entry[0] & "mX")
+      check screen.style.attributes == entry[1]
+      check screen.style.foreground == indexedTerminalColor(1)
+
+    var
+      screen = initTerminalScreen(8, 2)
+      parser = initTerminalParser()
+    screen.feed(parser, "\x1b[1;31;4m\x1b[4:0mX")
+    check screen.style.attributes == {taBold}
+    check screen.style.foreground == indexedTerminalColor(1)
+
+  test "oversized numeric selectors are ignored and parsing recovers":
+    let digits = repeat('9', 40)
+    for control in [
+      "\x1b[" & digits & "C",
+      "\x1b[" & digits & "m",
+      "\x1b]" & digits & ";bad\x07",
+      "\x1b]" & digits & ";bad\x1b\\",
+    ]:
+      for split in 0 .. control.len:
+        var
+          screen = initTerminalScreen(8, 2)
+          parser = initTerminalParser()
+        screen.feed(parser, "\x1b]2;kept\x07\x1b[31mA")
+        screen.feed(parser, control[0 ..< split])
+        screen.feed(parser, control[split ..< control.len] & "Z")
+        check screen.plainText() == "AZ"
+        check screen.title == "kept"
+        check screen.style.foreground == indexedTerminalColor(1)
+
+  test "large valid cursor and erase counts clamp before arithmetic":
+    let largest = $high(int)
+    for entry in [
+      ("C", initTerminalPosition(1, 7)),
+      ("D", initTerminalPosition(1, 0)),
+      ("B", initTerminalPosition(4, 1)),
+      ("A", initTerminalPosition(0, 1)),
+    ]:
+      var
+        screen = initTerminalScreen(8, 5)
+        parser = initTerminalParser()
+      screen.feed(parser, "\x1b[2;2H\x1b[" & largest & entry[0])
+      check screen.cursor.position == entry[1]
+      screen.moveCursorRelative(low(int), high(int))
+      check screen.cursor.position == initTerminalPosition(0, 7)
+    for command in ['H', 'd']:
+      var
+        screen = initTerminalScreen(8, 5)
+        parser = initTerminalParser()
+      screen.feed(parser, "\x1b[3;5r\x1b[?6h\x1b[" & largest & $command)
+      check screen.cursor.position == initTerminalPosition(4, 0)
+    var
+      screen = initTerminalScreen(8, 2)
+      parser = initTerminalParser()
+    screen.feed(parser, "ABCDEFGH\x1b[1;2H\x1b[" & largest & "X")
+    check screen.plainText() == "A"
+    check screen.cursor.position == initTerminalPosition(0, 1)
+
+  test "a repeat command has a bounded work count":
+    var
+      screen = initTerminalScreen(1, 1, maxScrollback = 2)
+      parser = initTerminalParser()
+    screen.feed(parser, "X\x1b[" & $high(int) & "b")
+    check screen.cellAt(0, 0).text == "X"
+    check screen.scrollbackCount == 2
+    check screen.scrollbackLinesAdded == MaxTerminalRepeatCount.uint64
+
   test "keyboard modifier controls do not change graphic rendition":
     for control in ["\x1b[>4;2m", "\x1b[?4m", "\x1b[>4;0m", "\x1b[>m"]:
       for split in 0 .. control.len:
@@ -502,6 +619,81 @@ suite "terminex terminal screen and parser":
     check screen.cursor.position == initTerminalPosition(0, 0)
     check screen.modes.autoWrap
 
+  test "horizontal cursor addressing preserves the row in origin mode":
+    for command in ['G', '`']:
+      var
+        screen = initTerminalScreen(12, 8)
+        parser = initTerminalParser()
+      screen.feed(parser, "\x1b[3;7r\x1b[?6h\x1b[2;4H\x1b[7" & $command & "X")
+      check screen.cellAt(3, 6).text == "X"
+      check screen.cursor.position == initTerminalPosition(3, 7)
+
+  test "cursor restore preserves unrelated modes and cursor appearance":
+    for saved in [false, true]:
+      var
+        screen = initTerminalScreen(8, 6)
+        parser = initTerminalParser()
+      if saved:
+        screen.feed(parser, "\x1b[3;6r\x1b[?6h\x1b[2;3H\x1b[1;31m\x1b7")
+      screen.modes = TerminexModes(
+        origin: false,
+        autoWrap: false,
+        insert: true,
+        applicationCursorKeys: true,
+        applicationKeypad: true,
+        bracketedPaste: true,
+        focusReporting: true,
+        alternateScroll: true,
+        mouseTracking: tmtAny,
+        mouseEncoding: tmeSgr,
+      )
+      screen.cursor.visible = false
+      screen.cursor.blinking = false
+      screen.cursor.shape = tcsBar
+      var expectedModes = screen.modes
+      expectedModes.origin = saved
+      screen.feed(parser, "\x1b8")
+      check screen.modes == expectedModes
+      check not screen.cursor.visible
+      check not screen.cursor.blinking
+      check screen.cursor.shape == tcsBar
+      check screen.cursor.position ==
+        (if saved: initTerminalPosition(3, 2) else: initTerminalPosition(0, 0))
+      check screen.style.foreground ==
+        (if saved: indexedTerminalColor(1) else: defaultTerminalColor())
+
+  test "cursor and alternate screen restoration preserve pending wrap and rendition":
+    for alternate in [false, true]:
+      var
+        screen = initTerminalScreen(4, 3)
+        parser = initTerminalParser()
+      screen.feed(parser, "\x1b[31mABCD")
+      if alternate:
+        screen.feed(parser, "\x1b[?1049h\x1b[32m\x1b7\x1b[?1049l")
+      else:
+        screen.feed(parser, "\x1b7\r\x1b[32m\x1b8")
+      screen.feed(parser, "X")
+      check screen.lineAt(0).mapIt(it.text).join() == "ABCD"
+      check screen.cellAt(1, 0).text == "X"
+      check screen.cellAt(1, 0).style.foreground == indexedTerminalColor(1)
+
+    var
+      screen = initTerminalScreen(4, 3)
+      parser = initTerminalParser()
+    screen.feed(parser, "ABCD\x1b7\x1b[?7l\x1b8X")
+    check not screen.modes.autoWrap
+    check screen.plainText() == "ABCX"
+
+  test "alternate screen cursor restoration clips after resize":
+    var
+      screen = initTerminalScreen(8, 5)
+      parser = initTerminalParser()
+    screen.feed(parser, "\x1b[5;8H\x1b[31m\x1b[?1049h\x1b[32m\x1b7")
+    screen.resize(3, 2)
+    screen.feed(parser, "\x1b[?1049lX")
+    check screen.cellAt(1, 2).text == "X"
+    check screen.cellAt(1, 2).style.foreground == indexedTerminalColor(1)
+
   test "oversized control strings are bounded and recover to normal text":
     var
       screen = initTerminalScreen(20, 2)
@@ -510,11 +702,65 @@ suite "terminex terminal screen and parser":
     screen.feed(parser, "\x1b[" & repeat('1', MaxTerminalCsiBytes + 2) & "Z")
     check parser.state == tpsGround
     screen.feed(parser, "ok")
-    check screen.plainText().endsWith("ok")
+    check screen.plainText() == "ok"
 
     parser.reset()
     screen.feed(parser, "\x1b]2;" & repeat('x', MaxTerminalStringBytes + 2))
+    check parser.state == tpsOsc
+    screen.feed(parser, "LEAK\x1b\\safe")
     check parser.state == tpsGround
+    check screen.title == ""
+    check screen.plainText() == "oksafe"
+
+  test "ESC restart and intermediate sequences never leak their final bytes":
+    for control in ["\x1b%G", "\x1b%/G", "\x1b\x1b[31m"]:
+      for split in 0 .. control.len:
+        var
+          screen = initTerminalScreen(8, 2)
+          parser = initTerminalParser()
+        screen.feed(parser, "A" & control[0 ..< split])
+        screen.feed(parser, control[split ..< control.len] & "B")
+        check screen.plainText() == "AB"
+        if control.endsWith("31m"):
+          check screen.cellAt(0, 1).style.foreground == indexedTerminalColor(1)
+
+  test "ignored strings retain framing through BEL and oversized payloads":
+    for introducer in ['P', 'X', '^', '_', ']']:
+      let control =
+        "\x1b" & $introducer & "2;" & repeat('a', MaxTerminalStringBytes + 8) &
+        "LEAK\x1b\\"
+      for split in [0, 1, 2, MaxTerminalStringBytes, control.len - 2, control.len - 1]:
+        var
+          screen = initTerminalScreen(8, 2)
+          parser = initTerminalParser()
+        screen.feed(parser, "\x1b]2;kept\x07A" & control[0 ..< split])
+        screen.feed(parser, control[split ..< control.len] & "B")
+        check screen.plainText() == "AB"
+        check screen.title == "kept"
+        check parser.state == tpsGround
+    for introducer in ['P', 'X', '^', '_']:
+      var
+        screen = initTerminalScreen(8, 2)
+        parser = initTerminalParser()
+      screen.feed(parser, "A\x1b" & $introducer & "data\x07LEAK\x1b\\B")
+      check screen.plainText() == "AB"
+
+  test "oversized OSC payloads terminate and cancel across input chunks":
+    for suffix in [
+      "\x07B", "\x1b\\B", "\x18B", "\x1aB", "\x1b\x18B", "\x1b\x1aB", "\x1b\x1b\\B",
+      "\x1b\x07B",
+    ]:
+      var
+        screen = initTerminalScreen(8, 2)
+        parser = initTerminalParser()
+      screen.feed(
+        parser, "\x1b]2;kept\x07A\x1b]2;" & repeat('a', MaxTerminalStringBytes + 3)
+      )
+      for character in suffix:
+        screen.feed(parser, $character)
+      check screen.plainText() == "AB"
+      check screen.title == "kept"
+      check parser.state == tpsGround
 
   test "ignored DCS payload cannot leak printable bytes into the screen":
     var
